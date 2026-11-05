@@ -1,0 +1,25 @@
+services:
+  mysql:
+    image: mysql:8.4
+    container_name: storeflow-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+    ports:
+      - "${MYSQL_PORT}:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: storeflow-redis
+    ports:
+      - "${REDIS_PORT}:6379"
+    restart: unless-stopped
+
+volumes:
+  mysql_data:
+  redis_data:

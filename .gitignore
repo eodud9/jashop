@@ -1,0 +1,29 @@
+# Environment variables
+.env
+.env.*
+!.env.example
+!**/.env.example
+
+# macOS
+.DS_Store
+
+# IntelliJ / IDE
+.idea/
+*.iml
+
+# Gradle / Spring Boot
+.gradle/
+**/build/
+**/out/
+
+# Frontend
+**/node_modules/
+**/dist/
+**/coverage/
+
+# Logs
+*.log
+logs/
+
+# Editor
+.vscode/
