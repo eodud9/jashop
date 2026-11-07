@@ -40,6 +40,19 @@
 }
 ```
 
+**Phase 1 구현(2026-11-07):** 공통 오류 DTO는 위의 5개 필드를 사용한다.
+`fieldErrors` 항목은 `{ "field": "quantity", "message": "수량은 0 이상이어야 합니다." }`
+형식이며 입력 원문/거부된 값은 포함하지 않는다. UTC `Clock`으로 `timestamp`를 생성하고,
+서버 MDC의 `traceId`가 없으면 요청 범위 UUID를 생성한다. 클라이언트 추적 헤더는 사용하지 않는다.
+처리되지 않은 예외는 `INTERNAL_SERVER_ERROR`/500과 고정 메시지를 반환하며,
+로그에는 추적 ID와 예외 클래스만 남긴다. 응답은 Accept 불일치 오류에서도 JSON이다.
+MVC의 잘못된 JSON·누락/타입 오류·요청 Bean Validation은 `VALIDATION_FAILED`/400,
+없는 경로는 `RESOURCE_NOT_FOUND`/404, 메서드 불일치는 `METHOD_NOT_ALLOWED`/405,
+응답 형식 불일치는 `NOT_ACCEPTABLE`/406, 요청 Content-Type 오류는
+`UNSUPPORTED_MEDIA_TYPE`/415로 매핑한다. 기타 프레임워크 오류는 원래 HTTP 상태를 보존하면서
+4xx는 `REQUEST_FAILED`, 5xx는 `INTERNAL_SERVER_ERROR`(503은 `SERVICE_UNAVAILABLE`)로 반환한다.
+Spring Security 필터의 401/403 응답 통합은 인증 구현 단계에서 처리한다.
+
 - 페이지 조회는 기본 `page=0&size=20`, 최대 size=100 **[권장]**. 대량 알림/이력은 `cursor` 기반 페이지네이션을 선택할 수 있으며 실제 각 엔드포인트 계약을 구현 때 고정한다.
 - [권장] 생성·완료 명령의 네트워크 재시도는 `Idempotency-Key` 헤더 또는 요청 키 테이블/도메인 유일성으로 통제한다. **키 설계가 확정되지 않았으므로 자동으로 모두 멱등하다고 주장하지 않는다.**
 - JWT 만료와 사용자 비활성화 등 계정 상태 검사는 별개다. 토큰이 유효해도 권한이 철회됐으면 업무 API를 거부해야 한다.
@@ -53,6 +66,9 @@
 ---
 
 ## 2. Auth · User · Store
+
+**구현 상태(2026-11-07):** Phase 2-1은 Store 영속성만 구현했다.
+이 절의 Store API와 User/Auth API는 아직 구현되지 않았다.
 
 ### 2.1 엔드포인트
 

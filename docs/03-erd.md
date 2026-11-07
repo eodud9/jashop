@@ -4,6 +4,10 @@
 - **17개 테이블은 확정된 도메인 구성**이며, 이 문서의 상세 SQL 타입·추가 컬럼·인덱스는 구현 기준안이다.
 - 실제 구현 전 Flyway DDL을 작성하고 MySQL Testcontainers로 검증한다. **이 문서 자체가 이미 실행된 마이그레이션은 아니다.**
 
+**구현 상태(2026-11-07):** `V1__create_stores.sql`에 아래 `stores`만 구현했다.
+기존 로컬 스키마가 비어 있음을 확인하고 V1을 적용했으며 나머지 16개 업무 테이블은 미구현이다.
+Flyway 이력 테이블은 업무 엔티티 17개와 별개의 도구 관리 테이블이다.
+
 ## 1. 공통 규칙
 
 - 모든 ID는 BIGINT(예: AUTO_INCREMENT)이며 서버 내부 Java `Long`으로 사용한다.
@@ -239,6 +243,12 @@ erDiagram
 ## 3. 17개 테이블 컬럼 사전
 
 ### 01. `stores` — 매장 마스터
+
+구현: InnoDB / utf8mb4 / utf8mb4_0900_ai_ci, ID AUTO_INCREMENT,
+`uk_stores_code` UNIQUE, 모든 컬럼 NOT NULL. 코드의 비교는 이 collation을 따른다.
+Java의 생성/수정 시각은 `Instant`, JDBC는 UTC로 해석하는 TIMESTAMP 타입,
+실제 MySQL 컬럼은 DATETIME(6)으로 매핑했다. 생성/변경 시각은 호출 측에서
+`Instant.now(clock)`으로 제공한다. 임의 매장 시드·사용자 FK는 추가하지 않았다.
 
 | 컬럼 | MySQL 타입(권장) | 제약 | 의미 |
 |---|---|---|---|
@@ -569,6 +579,9 @@ CREATE UNIQUE INDEX uk_schedule_user_active_date
 - 초기 제품/옵션은 운영자 등록 API 또는 마이그레이션 시드로 준비하되, 실제 수량을 임의로 확정해 저장하지 않는다.
 
 ## 8. Flyway 마이그레이션 순서(권장)
+
+현재 V1은 `stores`만 생성한다. 아래 목록은 의존 순서이며 한 버전에 모두 만들라는 의미가 아니다.
+이미 적용된 V1은 변경하지 않고, User 등 후속 테이블은 V2 이후에 추가한다.
 
 1. `stores` → `users` → `auth_sessions` (users 자기 참조 승인 FK는 별도 ALTER 가능).
 2. `work_schedules` → `attendances` → `checkout_notices`.

@@ -1,6 +1,9 @@
 # 05. 기술 아키텍처 및 개발 환경
 
-**기준일:** 2026-11-05 · 설계/구현 상태를 구별한다. **[현재]**는 사용자가 실제로 생성했다고 확인한 설정, **[권장]**은 아직 적용 여부를 확인하지 않은 제안이다.
+**설계 기준일:** 2026-11-05 · **구현 대조일:** 2026-11-07.
+**[현재]**는 저장소 코드로 확인한 구성, **[권장]**은 미적용 제안이다.
+공통 기반과 Store 영속성까지 구현했으며, 아래 목표 아키텍처 전체가 구현된 것은 아니다.
+테스트·로컬 기동 결과는 2026-11-07 실행 기록이며 이번 문서 정리에서 재실행하지 않았다.
 
 ## 1. 현 저장소와 기술 환경
 
@@ -8,6 +11,8 @@
 storeflow/
 ├── README.md
 ├── docs/
+├── compose.yml                 # MySQL/Redis 로컬 인프라
+├── .env.example                # Compose 환경변수 샘플
 ├── storeflow-backend/           # 실제 생성한 Spring Boot 프로젝트
 │   ├── build.gradle
 │   ├── settings.gradle
@@ -17,19 +22,21 @@ storeflow/
 └── storeflow-frontend/          # 실제 생성한 React/Vite 프로젝트
 ```
 
-**[현재] 사용자가 전달한 `build.gradle`**:
+**[현재] 저장소의 `build.gradle`과 Gradle Wrapper**:
 
 | 항목 | 확인 내용 |
 |---|---|
 | Group | `com.storeflow` |
 | Spring Boot | `4.1.2` |
 | Java Toolchain | `21` |
-| Build | Gradle Groovy DSL, `io.spring.dependency-management` `1.1.7` |
+| Build | Gradle Wrapper `9.8.2`, Groovy DSL, `io.spring.dependency-management` `1.1.7` |
 | Spring | Actuator, Data JPA, Data Redis, Security, Validation, Web MVC |
 | Driver | `com.mysql:mysql-connector-j` |
-| Test | 분리된 Boot 4 Starter Test 모듈, JUnit Platform Launcher |
+| Migration | Flyway Starter + `flyway-mysql`, V1 stores |
+| Test | 분리된 Boot 4 Starter Test 모듈, JUnit Platform Launcher, Testcontainers MySQL |
 
-**공식 문서 검증:** Spring Boot 4.1.2는 Java 17 이상을 지원하고 Gradle 8.x의 경우 **8.14 이상**을 요구한다. Java 21은 적합하다. Wrapper의 실제 버전은 `storeflow-backend/gradle/wrapper/gradle-wrapper.properties`에서 확인해야 한다. 버전 변경은 Java/Gradle/플러그인 호환성을 재검증한 다음 진행한다.
+**실행 확인:** Java 21 / Spring Boot 4.1.2 / Gradle Wrapper 9.8.2에서 빌드·전체 테스트와
+로컬 DB/JPA 비웹 기동을 완료했다. 버전 변경 시에는 아래 공식 문서와 실제 빌드로 호환성을 재검증한다.
 
 공식 근거:
 - Spring Boot 시스템 요구사항: https://docs.spring.io/spring-boot/system-requirements.html
@@ -70,7 +77,15 @@ flowchart TB
 
 **MySQL = 업무 상태·이력의 신뢰 원천**, Redis = 부가 최근 조회, SSE = 실행 중 UI 변경 안내, Web Push = 백그라운드 알림. 실시간 알림을 놓쳤다고 해서 업무 상태가 사라지지 않는다.
 
-## 3. 패키지 구조 [권장]
+## 3. 패키지 구조와 구현 범위
+
+**Phase 1 구현(2026-11-07):** 아래 기능 패키지와 `global` 하위 패키지를
+`package-info.java`로 구성했다. 실제 공통 코드는 `global.config.ClockConfig`와
+`global.error`의 ErrorCode/BusinessException/ApiError/GlobalExceptionHandler이다.
+Phase 2-1에서 `store.domain.Store`와 `store.infrastructure.StoreRepository`를 추가했다.
+나머지 기능 패키지 및 `global.security`, `global.support`는 `package-info.java`만 존재한다.
+아래 트리의 주석은 각 패키지의 목표 책임이며, Clock·오류 처리·Store 영속성 외 코드는 미구현이다.
+기능별 api/application/domain/infrastructure는 해당 기능 구현 시 필요한 만큼 추가한다.
 
 Spring Boot는 **package-by-feature**를 기본으로 하고, 너무 이른 시기에 각 기능을 복잡한 멀티모듈로 쪼개지 않는다.
 
@@ -123,96 +138,129 @@ runtimeOnly 'com.mysql:mysql-connector-j'
 
 `spring-boot-starter-webmvc` 및 도메인별 `*-test` Starter 분리는 Spring Boot 4의 구성과 일치한다. 기존 Test Starter들을 확인 없이 모두 교체하지 않는다.
 
-### 4.2 단계적으로 추가 [권장]
+### 4.2 추가 의존성의 적용 상태
 
-| 도입 시점 | 후보 | 이유 |
+| 적용 상태/도입 시점 | 의존성 | 이유 |
 |---|---|---|
-| 1단계 | `org.springframework.boot:spring-boot-starter-flyway` + `org.flywaydb:flyway-mysql` | MySQL 8.4 스키마 버전 관리 |
+| Phase 1 적용 | `org.springframework.boot:spring-boot-starter-flyway` + `org.flywaydb:flyway-mysql` | MySQL 8.4 스키마 버전 관리 |
 | Auth 구현 | `org.springframework.boot:spring-boot-starter-security-oauth2-resource-server` | JWT 서명·표준 검증 구성(구체 의존성 확인) |
-| 통합 테스트 | Spring Boot Testcontainers 지원 + `org.testcontainers:mysql` + JUnit Jupiter 연동 | 진짜 MySQL 잠금·제약 검증 |
+| 통합 테스트(Phase 2-1 적용) | `spring-boot-testcontainers` + `org.testcontainers:testcontainers-mysql` + `org.testcontainers:testcontainers-junit-jupiter` | Testcontainers 2.x 모듈로 실제 MySQL 제약·마이그레이션 검증 |
 | API 완성 | Springdoc OpenAPI, Spring Boot 4 호환 버전 확인 | Swagger UI·계약 검증 |
 | Web Push 단계 | Web Push/VAPID Java 라이브러리(호환 검증) | 브라우저 푸시 전송 |
 
 Flyway 의존성은 공식 Spring Boot 데이터베이스 초기화 가이드에 근거한다: https://docs.spring.io/spring-boot/how-to/data-initialization.html . JWT 구현은 `spring-security-oauth2-resource-server`와 JOSE 지원이 필요하므로 실제 Starter/전이 의존성을 확인한다: https://docs.spring.io/spring-security/reference/servlet/oauth2/resource-server/jwt.html .
 
-## 5. 로컬 개발 인프라 [권장]
+## 5. 로컬 개발 인프라 [현재]
 
-**Spring Boot는 IntelliJ/Gradle로 직접 실행**, MySQL과 Redis는 Docker Compose로 분리한다. 기존 Mac의 3306 충돌을 피하도록 호스트 포트 3307을 예시로 사용한다. 보안상 컨테이너 포트는 `127.0.0.1`에만 바인딩한다.
+Spring Boot는 IntelliJ/Gradle로 실행하고, MySQL과 Redis는 루트 `compose.yml`로 실행한다.
+별도 `application-local.yml`은 없으며 기본 `application.yaml`에 연결 설정이 있다.
 
-저장소 루트의 `compose.yaml` **예시**:
+| 항목 | 실제 저장소 구성 |
+|---|---|
+| MySQL | `mysql:8.4`, 컨테이너명 `storeflow-mysql` |
+| MySQL 포트 | `${MYSQL_PORT}:3306`, `.env.example`의 호스트 포트는 3308 |
+| MySQL 볼륨 | `mysql_data:/var/lib/mysql` |
+| Redis | `redis:7-alpine`, 컨테이너명 `storeflow-redis` |
+| Redis 포트 | `${REDIS_PORT}:6379`, `.env.example`의 호스트 포트는 6379 |
+| Redis 볼륨 | 서비스에 연결하지 않음. 최상위 `redis_data` 선언만 존재 |
+| 포트 바인딩 | MySQL/Redis 모두 호스트 IP를 지정하지 않음 |
+| Healthcheck | Compose에 명시하지 않음 |
 
-```yaml
-services:
-  mysql:
-    image: mysql:8.4
-    environment:
-      MYSQL_DATABASE: storeflow
-      MYSQL_USER: storeflow
-      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
-    ports:
-      - "127.0.0.1:3307:3306"
-    volumes:
-      - mysql_data:/var/lib/mysql
-    healthcheck:
-      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u root -p\"$$MYSQL_ROOT_PASSWORD\""]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-  redis:
-    image: redis:7-alpine
-    ports:
-      - "127.0.0.1:6379:6379"
-    volumes:
-      - redis_data:/data
-volumes:
-  mysql_data:
-  redis_data:
-```
+`.env.example`에는 MYSQL_DATABASE, MYSQL_USER, MYSQL_PASSWORD, MYSQL_ROOT_PASSWORD,
+MYSQL_PORT, REDIS_PORT의 개발용 샘플이 있다. 실제 `.env`는 Git 제외 대상이다.
+Compose가 읽는 `.env`는 Gradle/Spring Boot에 자동 전달되지 않는다.
 
-`.env.example`에는 비밀값의 **이름과 설명만** 넣고 실제 `.env`는 Git 제외. 예시 compose를 그대로 사용하기 전에 `MYSQL_PASSWORD`, `MYSQL_ROOT_PASSWORD`를 로컬 환경에서 설정해야 한다. 컨테이너 healthcheck와 DB 실행 가능 상태는 별개의 단계이므로 애플리케이션 시작 시 초기 연결 실패가 발생하면 healthcheck와 로그를 먼저 확인한다.
-
-`storeflow-backend/src/main/resources/application-local.yml` **예시**:
+`storeflow-backend/src/main/resources/application.yaml`의 실제 설정:
 
 ```yaml
 spring:
   datasource:
-    url: ${DB_URL:jdbc:mysql://localhost:3307/storeflow}
+    url: jdbc:mysql://localhost:3308/storeflow
     username: ${DB_USERNAME:storeflow}
     password: ${DB_PASSWORD}
     driver-class-name: com.mysql.cj.jdbc.Driver
   jpa:
-    open-in-view: false
     hibernate:
-      ddl-auto: none     # Flyway 도입 전 연결 점검 단계
+      ddl-auto: validate
+    properties:
+      hibernate.jdbc.time_zone: UTC
+    show-sql: true
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: false
+    clean-disabled: true
+    validate-on-migrate: true
   data:
     redis:
-      host: ${REDIS_HOST:localhost}
-      port: ${REDIS_PORT:6379}
+      host: localhost
+      port: 6379
 ```
 
-Flyway 마이그레이션이 완료된 후에는 `ddl-auto: validate`로 바꾸고 DDL을 JPA 자동 update에 의존하지 않는다. 실비밀번호를 `application*.yml`에 커밋하지 않는다. **DB 연결 오류** `Failed to configure a DataSource: 'url' attribute is not specified`는 MySQL Connector/J가 있더라도 URL 등 DataSource 설정이 누락됐을 때 발생할 수 있다.
+Compose 계정/포트와 백엔드 설정을 일치시키고, 백엔드 실행 환경에 DB_PASSWORD를 주입한다.
+DB_USERNAME은 필요할 때 지정하며 기본값은 storeflow다. 현재 DB URL과 Redis 호스트/포트에는
+환경변수 placeholder가 없으므로 Compose 변수만 바꾸면 백엔드 연결 설정은 바뀌지 않는다.
 
-### 5.1 실행 명령
+### 5.1 Store 영속성과 Flyway
+
+- V1은 `classpath:db/migration/V1__create_stores.sql`이며 stores만 생성한다.
+- `Store`는 `store.domain`, `StoreRepository`는 `store.infrastructure`에 있다.
+- 시각은 호출자가 제공한 Instant를 UTC DATETIME(6)으로 저장한다.
+- 코드에는 setter가 없고 이름 변경과 비활성화를 지원한다. 재비활성화는 기존 수정 시각을 보존한다.
+- Flyway가 스키마를 생성/변경하고 JPA는 validate만 수행한다. 적용된 V1은 수정하지 않는다.
+- 이력 없는 비어 있지 않은 DB는 자동 baseline하지 않는다. 기존 스키마를 검토한 후 도입한다.
+- Store API/Service, User, 인증·인가 서비스는 미구현이다.
+
+### 5.2 테스트와 검증 기록
+
+공통 컨텍스트 테스트는 `test` 프로파일에서 DataSource/JPA/Flyway 자동 설정과 Redis Repository를
+제외한다. 공통 MVC 테스트는 보안 필터를 제외하고 오류 응답 계약만 확인한다.
+따라서 공통 테스트 통과는 실제 DB 연결이나 보안 필터의 인증·인가 성공을 의미하지 않는다.
+
+Store 통합 테스트는 이 프로파일 없이 `@DataJpaTest`, Flyway 자동 설정 명시 import,
+`@AutoConfigureTestDatabase(replace=NONE)` 및 `@ServiceConnection`을 사용한다.
+Boot BOM 관리 Testcontainers 2.0.5로 `mysql:8.4`를 실행하며, 기존 Compose DB/볼륨/3308 포트를
+공유하지 않는다. H2 대체나 Docker 부재 시 자동 스킵은 없다.
+첫 실행 시 Gradle 의존성과 MySQL/Ryuk 이미지를 내려받으려면 네트워크가 필요할 수 있다.
+
+2026-11-07 저장된 JUnit 결과는 전체 29건 통과(공통 20 + MySQL 9, 실패/스킵 0)다.
+같은 날 로컬 MySQL 8.4.11의 빈 storeflow 스키마에 V1을 적용하고 비웹 기동 2회에서
+최초 적용, 재실행 no-op, JPA validate를 확인했다. 당시 stores 행은 0개였다.
+기존 데이터/볼륨 삭제·재생성, baseline, repair, 임의 시드 입력은 수행하지 않았다.
+이는 해당 실행 시점의 기록이며 현재 DB 행 수나 컨테이너 실행 상태를 상시 보장하지 않는다.
+
+### 5.3 실행 명령
 
 ```bash
-# 저장소 루트
-cp .env.example .env     # 예시 파일이 준비된 뒤 사용, 실제 비밀번호 설정
-docker compose up -d
-docker compose ps
+# 저장소 루트: .env.example을 참고해 .env 또는 Compose 환경변수 준비
+# 기존 .env가 있다면 덮어쓰지 않고 필요한 설정만 확인
+docker compose -f compose.yml up -d
+docker compose -f compose.yml ps
 
-# 백엔드만 이동해서 실행
+# 백엔드: 위 Compose 설정과 일치하는 DB_USERNAME/DB_PASSWORD를 실행 환경에 주입
 cd storeflow-backend
 ./gradlew --version
 ./gradlew test
-./gradlew bootRun --args='--spring.profiles.active=local'
+./gradlew bootRun
+
+# HTTP 서버 없이 로컬 DB/Flyway/JPA 기동만 점검
+./gradlew bootRun --args='--spring.main.web-application-type=none --spring.data.redis.repositories.enabled=false'
 ```
 
-Gradle Wrapper 버전은 `gradle-wrapper.properties`에서 실제 확인한다. `compose.yaml`이 프로젝트 루트에 있고 백엔드가 하위 폴더에 있으므로 `cd storeflow-backend` 상태에서 그냥 `docker compose up`을 실행하면 설정 파일을 찾지 못할 수 있다.
+현재 별도 local 프로파일 설정 파일은 없으므로 기본 설정으로 실행한다.
+전체 테스트는 기존 Compose 서비스를 시작하지 않아도 별도의 Docker 컨테이너로 DB 테스트를 수행한다.
+일반 웹 모드의 HTTP·인증 검증과 Redis 기능 통합 테스트는 아직 수행 범위에 포함되지 않았다.
 
-**선택 사항:** Spring Boot Docker Compose 자동 서비스 연결을 쓰는 경우에는 수동 DataSource 설정과 적용 우선순위를 확인해야 한다. 초기는 명시적 `application-local.yml` 연결이 학습에 더 직관적이다.
+### 5.4 미적용 개발 환경 개선안 [권장]
 
-## 6. 인증·인가 전략
+다음은 현재 코드에 적용된 설정이 아니다. 후속 환경 작업에서 필요성을 확인해 적용한다.
+
+- 포트의 호스트 IP를 127.0.0.1로 제한.
+- MySQL healthcheck 추가.
+- Redis 데이터 보존이 필요하면 선언된 redis_data 볼륨을 서비스에 연결.
+- 환경별 연결 설정이 필요해지면 local 프로파일 또는 URL/호스트 환경변수 도입.
+
+## 6. 인증·인가 전략 [목표 · 미구현]
 
 1. **Access JWT:** 짧은 유효기간, issuer/audience/signature/expiration 검증. Access Token은 가급적 브라우저 메모리에만 보관.
 2. **Refresh:** MySQL AuthSession에서 해시로 관리, HttpOnly + Secure Cookie, rotate/revoke, 동시 회전·재사용 검출.
@@ -223,7 +271,7 @@ Gradle Wrapper 버전은 `gradle-wrapper.properties`에서 실제 확인한다. 
 
 가입 대기 계정의 푸시 구독은 생성하지 않는다. 초기 MANAGER는 안전한 부트스트랩/운영자 설정으로만 생성한다.
 
-## 7. Redis — 최근 조회 옵션
+## 7. Redis — 최근 조회 옵션 [목표 · 미구현]
 
 **키:** `storeflow:recent-products:user:{userId}` · **자료구조:** LIST · **최대 10개** · **TTL 예시:** 7일.
 
@@ -233,7 +281,7 @@ Gradle Wrapper 버전은 `gradle-wrapper.properties`에서 실제 확인한다. 
 - Redis를 상품·재고 업무의 소스 오브 트루스로 사용하지 않는다.
 - 조회 기록 TTL 갱신은 실제 **상세 조회**를 기준으로 한다.
 
-## 8. DB 정합성과 동시성
+## 8. DB 정합성과 동시성 [후속 업무 구현 기준]
 
 ### 8.1 수락 조건부 UPDATE
 
@@ -253,7 +301,7 @@ SupportRequest 행을 잠궈 잔여 정원을 확인하고, User 행을 **ID 오
 
 `StockVerification INSERT + StockRecord UPSERT/UPDATE + StockCheckRequest COMPLETED + Notification/Delivery INSERT`는 같은 MySQL 트랜잭션. DB 커밋 전에 외부 Push 호출을 하지 않는다. 버전 충돌/DB UNIQUE/ROLLBACK은 **진짜 MySQL**에서 통합 테스트.
 
-## 9. 알림 아키텍처
+## 9. 알림 아키텍처 [목표 · 미구현]
 
 ```mermaid
 sequenceDiagram
@@ -282,7 +330,7 @@ sequenceDiagram
 - **수신자 권한:** 요청 당시 현재 근무 매장으로 알림을 저장하고, 푸시 전송 직전 현재 WORKING 여부/업무 상태를 재검증해 오래된 업무 알림을 생략한다.
 - **SSE 확장:** 단일 서버에서 시작; 다중 서버가 되면 Redis Pub/Sub 등의 브로드캐스트 고려. Redis 메시지를 영속 알림 저장으로 대체하지 않는다.
 
-## 10. 프론트엔드/PWA
+## 10. 프론트엔드/PWA [목표 · 기능 미구현]
 
 - React + TypeScript + Vite. 우선 UI는 로그인/승인 상태, 홈 대시보드, 내 근무, 상품 검색/상세/창고 위치, 재고 확인 업무, 지원 업무, 알림함 순서로 구현.
 - PWA 필수: HTTPS(로컬호스트 예외), Manifest, 설치 아이콘, Service Worker, 권한 요청 후 Push Subscription 등록.
@@ -298,15 +346,18 @@ sequenceDiagram
 - 로컬: Docker Compose MySQL·Redis + IntelliJ/Gradle 백엔드 + Vite 개발 서버.
 - 배포 후보: HTTPS 리버스 프록시 또는 ALB, 백엔드 컨테이너, RDS MySQL, 정적 PWA 호스팅, 필요 시 관리형 Redis. AWS 구조·비용은 검증 후 결정.
 - 스키마: Flyway 버전 관리, 테스트 DB/운영 DB의 스키마 일치, 백업·복구 훈련, 마이그레이션 실패 시 배포 중지.
-- 루트 `.gitignore`: `.DS_Store`, `.idea/`, `.env`, `storeflow-backend/build/`, `storeflow-frontend/node_modules/`, 각종 생성 파일 제외. 이미 Git이 추적 중인 `.idea/`와 `.DS_Store`는 `.gitignore` 추가만으로 제거되지 않으니 `git rm --cached`로 추적 해제.
+- 루트 `.gitignore`는 `.DS_Store`, `.idea/`, `.env`, 백엔드 build와 프론트엔드 node_modules 등 생성 파일을 제외한다. 현재 Git 추적 목록에서 `.idea/`와 `.DS_Store` 항목은 조회되지 않는다.
 
-## 12. 개발 환경 완료 조건
+## 12. 개발 환경 확인 범위
 
-- `docker compose ps`에서 MySQL/Redis가 정상 실행 상태다.
-- Spring Boot 4.1.2 / JDK21 / Gradle Wrapper가 정상 실행된다.
-- `application-local.yml`의 DB 접속 URL 및 환경변수 설정으로 DataSource 구성 오류가 사라진다.
-- Flyway 초기 스키마 생성 후 `ddl-auto=validate`가 통과한다.
-- `./gradlew test`와 주요 API 통합 테스트 결과를 기록한다.
-- JWT 미설정 시 Spring Security 기본 보호 동작을 이해하고, 무작정 `permitAll()`로 전 API를 열지 않는다.
+- [x] Java 21 / Spring Boot 4.1.2 / Gradle Wrapper 9.8.2 빌드·테스트 실행.
+- [x] 기본 application.yaml로 로컬 DB/Flyway/JPA 비웹 기동 검증(2026-11-07 기록).
+- [x] Store V1 최초 적용·재실행과 ddl-auto=validate 통과.
+- [x] 전체 테스트 29건 통과 기록.
+- [ ] 일반 웹 모드의 HTTP 및 실제 인증·인가 동작 검증.
+- [ ] Redis 연결/기능 통합 테스트.
+
+Spring Security Starter는 존재하지만 JWT와 사용자 자격 검증 코드는 없다.
+전체 API를 permitAll로 열지 않고, 각 업무 API 도입 시 보안 필터와 권한 검증을 함께 구현한다.
 
 [테스트와 단계별 구현 계획](07-development-plan.md)에 따라 확장한다.

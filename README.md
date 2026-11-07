@@ -96,20 +96,22 @@ storeflow/
 └── storeflow-frontend/       # 생성된 React/Vite 프로젝트
 ```
 
-로컬 `compose.yaml`, 환경별 설정 파일, 마이그레이션 스크립트는 개발 환경 구성 단계에서 추가할 예정입니다. 기존 문서에 적힌 `backend/`, `frontend/` 경로 대신 **현재 저장소의 실제 폴더명**을 기준으로 합니다.
+로컬 인프라는 루트 `compose.yml`, 백엔드 연결은 `application.yaml`에 구성되어 있습니다.
+Flyway `db/migration/V1__create_stores.sql`로 `stores`만 생성하며, 이후 DDL은 기능별로 추가합니다.
+기존 문서에 적힌 `backend/`, `frontend/` 대신 **현재 저장소의 실제 폴더명**을 기준으로 합니다.
 
-## 로컬 실행(개발 환경 구성 이후)
+## 로컬 실행
 
 ```bash
 # 저장소 루트
-# compose.yaml이 추가된 이후에만 실행 가능
+# Compose에 필요한 MYSQL_*/REDIS_PORT 환경변수를 먼저 설정
 docker compose up -d
 
 # 백엔드
 cd storeflow-backend
 ./gradlew --version
 ./gradlew test
-./gradlew bootRun --args='--spring.profiles.active=local'
+./gradlew bootRun
 
 # 다른 터미널에서 프론트엔드
 cd storeflow-frontend
@@ -118,9 +120,12 @@ npm run dev
 ```
 
 - MySQL·Redis 연결 URL과 비밀번호는 개발용 환경변수 또는 Git에 포함하지 않는 `.env`로 주입합니다.
-- MySQL JDBC 드라이버만 추가해도 DB URL이 없으면 Spring Boot는 시작되지 않습니다. `application-local.yml`과 DB 컨테이너 구성이 선행되어야 합니다.
+- 현재 `application.yaml`은 MySQL `localhost:3308/storeflow`, `${DB_USERNAME:storeflow}`, `${DB_PASSWORD}`를 사용합니다. Compose 포트/계정과 일치해야 합니다.
+- Compose가 읽는 `.env`는 Gradle/Spring에 자동 전달되지 않습니다. `bootRun` 실행 환경에도 DB 계정과 `DB_PASSWORD`를 설정해야 합니다.
 - `./gradlew`는 **`storeflow-backend/`** 아래에서 실행합니다.
-- 위 명령은 **개발 환경이 완성된 후 사용할 절차**이며 현재 전부 실행·검증되었다는 뜻이 아닙니다.
+- 전체 테스트에는 Docker가 필요합니다. Testcontainers가 기존 Compose DB/볼륨과 분리된 MySQL 8.4를 생성하며, Docker가 없으면 통합 테스트는 실패합니다(자동 스킵 없음).
+- 2026-11-07 `./gradlew test`로 **29건 통과**: 공통 20건 + 실제 MySQL Store 영속성/마이그레이션 9건. 기존 공통 테스트는 계속 외부 DB와 분리됩니다.
+- 로컬 MySQL 8.4.11의 빈 `storeflow` 스키마에 V1 적용 후, 비웹 모드 기동을 두 번 실행해 최초 적용·재실행·JPA `validate`를 확인했습니다. HTTP API, Redis 기능, User 도메인은 이 검증에 포함되지 않습니다.
 
 ## 문서
 
@@ -145,8 +150,10 @@ npm run dev
 
 ## 범위 및 진행 상태
 
-- **완료:** 요구사항·핵심 정책 합의, 17개 테이블 논리 설계, API 설계, 백엔드·프론트엔드 프로젝트 생성.
-- **진행 예정:** 로컬 Docker Compose, Flyway, 실제 코드·통합 테스트, PWA 화면 및 Web Push 실기기 검증, CI/CD·AWS 배포.
+- **완료:** 요구사항·핵심 정책 합의, 17개 테이블 논리 설계, API 설계, 백엔드·프론트엔드 프로젝트 생성. Phase 1 공통 패키지·오류 응답·UTC Clock·Flyway 경로/안전 설정(2026-11-07).
+- **완료(Phase 2-0/2-1):** 기존 DB 사전 점검, Store V1 마이그레이션·엔티티·Repository, UTC DATETIME(6) 매핑, 실제 MySQL 통합 테스트. 로컬 V1 적용 후 `stores` 행은 0개이며 임의 매장 시드는 없습니다.
+- **현재 소스:** 루트 `compose.yml` 및 `application.yaml` 연결 설정 존재. 공통 테스트는 외부 MySQL/Redis 없이 실행하도록 분리.
+- **진행 예정:** User·회원가입·관리자 승인·인증, Store API와 인가, 나머지 업무 DDL·API·통합 테스트, PWA 화면 및 Web Push 실기기 검증, CI/CD·AWS 배포.
 - **MVP 제외:** POS 연동, 자동 재고 차감, 불량·유실, 급여 계산, 인력 자동 추천, AI 음성/자연어 검색.
 
 각 기능의 **확정 정책과 구현 제안은 [결정 기록](docs/06-decisions.md)에서 구분**합니다. 코드와 문서가 달라지면 변경 이유와 테스트 결과를 함께 업데이트합니다.

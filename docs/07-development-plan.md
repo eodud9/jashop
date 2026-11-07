@@ -1,6 +1,10 @@
 # 07. StoreFlow 개발 계획 · 테스트 전략 · Codex 작업 지침
 
-**기준일:** 2026-11-05 · **실제 상태:** 요구사항·논리 ERD·API 설계 완료, Spring Boot/React 프로젝트 생성. MySQL/Redis 실행, 전체 비즈니스 로직, 배포가 이미 완료되었다고 가정하지 않는다.
+**설계 기준일:** 2026-11-05 · **구현 확인:** 2026-11-07.
+공통 기반과 Phase 2-0/2-1(Store 영속성) 구현·검증 완료.
+Store API, User/Auth 및 나머지 업무·배포는 미구현이다. 인프라별 검증 범위는 아래 기록을 따른다.
+테스트 결과와 로컬 DB 점검은 2026-11-07 실행 기록이다. 이번 문서 정리는 소스와 저장된
+JUnit 결과를 대조했으며 테스트·컨테이너·DB 상태를 새로 실행하거나 점검한 것은 아니다.
 
 ## 1. 개발 원칙
 
@@ -15,7 +19,7 @@
 
 | 단계 | 핵심 작업 | 해당 문서 | 완료 조건 |
 |---|---|---|---|
-| 0. 개발 환경 | Docker Compose MySQL·Redis, `.env.example`, `application-local.yml`, Gradle/Java 버전 확인 | 05 | Spring Boot 실행, DB·Redis 연결 확인, 민감 정보 Git 제외 |
+| 0. 개발 환경 | `compose.yml` MySQL·Redis, `.env.example`, `application.yaml`, Gradle/Java 버전 확인 | 05 | 기본 구성·DB 비웹 기동 검증 완료. HTTP/인증·Redis 연결 검증은 남음 |
 | 1. 공통 기반 | 패키지, 시간/Clock, ErrorCode, GlobalExceptionHandler, 요청 DTO 검증, Flyway 기본 생성 | 03/05 | 예외 응답·로그·DB 마이그레이션 재현 가능 |
 | 2. Store · User | 매장/사용자 JPA·Repository, 가입 대기와 관리자 승인, 리소스 범위 서비스 | 01/02/04 | 역할·상태·소속 검증 및 권한 거부 테스트 |
 | 3. AuthSession · JWT | Spring Security, 로그인/Refresh 회전/Logout, 토큰 상태 검사, 쿠키 보안 | 04/05 | 미승인 차단, 세션 폐기/회전/경쟁 테스트 |
@@ -36,26 +40,96 @@
 
 ### 단계 0 — 인프라 준비
 
-- [ ] 현재 `storeflow-backend/build.gradle`의 Java21/Spring Boot 4.1.2 확인.
-- [ ] `gradle-wrapper.properties`가 Spring Boot 4.1.2와 호환되는 Gradle 버전인지 확인(Gradle 8.x라면 8.14 이상).
-- [ ] 루트 `.gitignore` 추가, `.DS_Store`와 `.idea/` Git 추적 해제.
-- [ ] 루트 `compose.yaml`에 MySQL 8.4/Redis, localhost 포트 바인딩, 영속 볼륨.
-- [ ] 루트 `.env.example`에 환경 변수 이름·안전한 샘플을 기록, `.env`는 Git 제외.
-- [ ] `storeflow-backend/src/main/resources/application-local.yml`에 DataSource/Redis 연결 설정.
-- [ ] `docker compose up -d`, `docker compose ps`, `cd storeflow-backend && ./gradlew test`.
-- [ ] Spring Boot 실행 확인(기본 Spring Security의 인증 요구는 DB 연결 실패와 구분).
+- [x] 현재 `storeflow-backend/build.gradle`의 Java21/Spring Boot 4.1.2 확인.
+- [x] Gradle Wrapper 9.8.2에서 Java 21 / Boot 4.1.2 빌드·테스트 실행 확인.
+- [x] 루트 `.gitignore`에 `.env`, `.DS_Store`, `.idea/`, 빌드 산출물 제외. `.idea/`·`.DS_Store` Git 추적 항목 없음.
+- [x] 루트 `compose.yml`에 MySQL 8.4/Redis 서비스와 MySQL 영속 볼륨 구성.
+- [x] 루트 `.env.example`에 Compose 환경변수와 개발용 샘플 기록. 실제 `.env`는 Git 제외.
+- [x] `storeflow-backend/src/main/resources/application.yaml`에 DataSource/Redis 연결 설정. 별도 local 프로파일 파일은 없음.
+- [x] 2026-11-07 기존 MySQL/Redis 컨테이너 실행 상태 확인 및 전체 테스트 29건 통과 기록.
+- [x] 로컬 DB 자격 증명을 주입한 Spring Boot 비웹 기동 2회로 DB/Flyway/JPA 검증.
+- [ ] 일반 웹 모드의 HTTP·인증 동작 검증.
+- [ ] Redis 프로토콜 연결 및 실제 기능 통합 테스트.
+
+미적용 개선안은 완료 항목과 구분한다. 현재 Compose 포트에는 호스트 IP 제한과 healthcheck가
+없다. MySQL은 mysql_data를 연결하지만 Redis는 최상위 redis_data 선언만 있고 서비스 연결은 없다.
+localhost 바인딩·MySQL healthcheck·필요 시 Redis 볼륨 연결은 후속 환경 개선 사항이다.
+Compose의 .env는 백엔드에 자동 주입되지 않으므로 DB_PASSWORD 등 실행 환경변수를 별도로 설정한다.
 
 **중요:** DataSource `url` 설정이 누락되면 MySQL Driver 의존성이 있어도 실행 실패한다. 외부 의존성을 무작정 제거하지 않고 실제 설정·프로파일·포트를 먼저 확인.
 
 ### 단계 1 — 공통 계층
 
-- [ ] `ApiError(code,message,timestamp,traceId,fieldErrors)` 합의.
-- [ ] `BusinessException` + `GlobalExceptionHandler` + Bean Validation 오류 매핑.
-- [ ] `Clock` 주입과 UTC 저장, Asia/Seoul 날짜 계산 분리.
-- [ ] Flyway 초기 마이그레이션(17개 엔티티를 단계별로 추가해도 됨). JPA validate.
-- [ ] 단순 환경/예외 관련 테스트.
+- [x] `ApiError(code,message,timestamp,traceId,fieldErrors)` 공통 오류 형식 구현.
+- [x] `ErrorCode` + `BusinessException` + `GlobalExceptionHandler` + Bean Validation 오류 매핑.
+- [x] UTC `Clock` 주입과 오류 시각 생성. 업무 저장/Asia/Seoul 날짜 계산은 관련 기능에서 구현.
+- [x] 첫 기능(Store)의 Flyway V1 적용·재실행 및 JPA validate. 나머지 테이블은 기능별로 추가.
+- [x] 단순 환경/예외 관련 테스트.
 
-### 단계 2~3 — Store/User/Auth
+2026-11-07 Phase 1 범위에서 기능별 패키지, Flyway 의존성/안전 설정 및
+`db/migration` 디렉터리를 준비했다. 당시 업무 SQL과 엔티티는 없었으며,
+첫 기능의 DDL 적용/재실행 및 JPA validate는 아래 Phase 2-1에서 완료했다.
+공통 MVC 테스트는 보안 필터를 테스트 안에서만 제외한다. 운영 Security 설정은 유지하며,
+인증 필터의 401/403 오류 계약은 후속 인증 단계에서 검증한다.
+실제 DB 통합 검증은 Phase 2-1에서 Store 범위에 한해 완료했으며 나머지 도메인은 미검증이다.
+
+Phase 1 당시 검증: `cd storeflow-backend`에서 `./gradlew test --offline` 실행,
+MVC 오류 계약 19건 + DB 비의존 컨텍스트 1건 = **20건 통과(실패/스킵 0)**.
+400/401/403/404/409/500/503, 405/406/415의 상태 보존, Bean Validation,
+잘못된 JSON, UTC 시각, 추적 ID 및 예외/입력값 비노출을 확인했다.
+
+### 단계 2-0 — DB 도입 전 점검 (완료: 2026-11-07)
+
+- [x] 기존 `storeflow-mysql` 실행과 호스트 3308 연결 확인(MySQL 8.4.11).
+- [x] `information_schema`로 `storeflow` 테이블 0개, Flyway 이력 없음 확인.
+- [x] 문자셋 utf8mb4 / collation utf8mb4_0900_ai_ci 확인.
+- [x] V1 적용 직전에도 빈 스키마임을 재확인. baseline/repair/clean 또는 기존 데이터·볼륨 삭제 없음.
+- [x] 통합 테스트는 기존 DB/볼륨과 분리된 일회성 Testcontainers MySQL 8.4로 구성.
+
+이번 로컬 DB에는 기존 업무 행이 없었다. 데이터가 있는 DB에서의 자동 채택 거부와
+마이그레이션 재실행 시 행 보존은 테스트 컨테이너에 데이터를 만들어 별도로 검증했다.
+이력이 없는 비어 있지 않은 다른 DB를 연결할 경우 자동 baseline하지 않고 먼저 스키마를 검토한다.
+
+### 단계 2-1 — Store 영속성 (완료: 2026-11-07)
+
+- [x] `V1__create_stores.sql`: stores 1개 업무 테이블, PK/UNIQUE/NOT NULL/InnoDB/utf8mb4.
+- [x] `Store`: ID·코드·이름·active·생성/수정 시각. 이름 변경과 데이터 보존형 비활성화.
+- [x] `StoreRepository`: JPA 저장/조회, 코드 조회·존재 확인.
+- [x] UTC DATETIME(6) 매핑과 `ddl-auto=validate`.
+- [x] 실제 MySQL 통합 테스트 9건 및 기존 공통 테스트 20건 통과(실패/스킵 0).
+- [x] 로컬 빈 DB V1 적용 후 비웹 모드 기동 2회 성공: 최초 적용 / 재실행 no-op / JPA validate.
+
+통합 테스트 9건: 저장·재조회와 UTC 마이크로초, 코드 조회·존재 확인, 코드 UNIQUE,
+이름 변경 dirty checking, 비활성화 후 행 보존, 커밋된 행을 둔 migrate 재실행 no-op,
+스키마 속성, 이력 없는 비어 있지 않은 DB의 자동 채택 거부, 체크섬 변경 감지.
+2026-11-07 로컬 적용 직후에는 `stores`와 `flyway_schema_history`만 존재했고 `stores` 행은 0개였다.
+현재 DB 상태를 실시간으로 조회한 결과는 아니다.
+
+실행 명령(백엔드 디렉터리):
+
+```bash
+./gradlew test
+# 로컬 DB 자격 증명을 환경변수로 주입한 상태에서 DB/JPA 기동 점검
+./gradlew bootRun --args='--spring.main.web-application-type=none --spring.data.redis.repositories.enabled=false'
+```
+
+통합 테스트의 연결 정보는 `@ServiceConnection`으로 테스트 컨테이너에서 제공한다.
+기존 공통 테스트용 `test` 프로파일의 DB 제외 설정을 사용하지 않는다.
+로컬 점검의 비웹 모드는 HTTP/API·Redis 기능 검증을 의미하지 않는다.
+Store Controller/Service/API와 User 도메인은 이번 범위에서 추가하지 않았다.
+
+### 단계 2-2 이후 및 단계 3 — User/Store API/Auth (미구현)
+
+다음 권장 작업은 User 영속성과 회원가입을 두 단위로 나누는 것이다.
+이는 구현 예정 범위이며 아래 체크리스트의 완료를 의미하지 않는다.
+
+| 작업 | 구현 범위 | 완료 기준 |
+|---|---|---|
+| 2-2A User 영속성 | 새 V2 SQL, User/역할/상태, Repository. 기존 V1은 유지 | MySQL 저장·조회, 이메일 UNIQUE, Store FK, JPA validate |
+| 2-2B 회원가입 | DTO, 비밀번호 해시, 가입 Service/Controller | STAFF/PENDING·소속 없음, 201/중복 409, 입력 검증·권한 상승 방지 |
+
+이메일 정규화, 비밀번호 입력 기준, 허용하지 않는 요청 필드 처리 방식은 관련 설계를 확인해
+구현 전에 구체화한다. 이후 초기 MANAGER/인가 기반, Store API, 승인 기능과 JWT를 단계별로 구현한다.
 
 - [ ] 가입 시 PENDING + STAFF 초기화; 역할/소속은 클라이언트 지정 불가.
 - [ ] 총괄 MANAGER 부트스트랩, 직원·부매니저 승인 시 homeStore 지정.
