@@ -10,7 +10,9 @@ spring:
 
   jpa:
     hibernate:
-      ddl-auto: none
+      ddl-auto: validate
+    properties:
+      hibernate.jdbc.time_zone: UTC
     show-sql: true
 
   flyway:
