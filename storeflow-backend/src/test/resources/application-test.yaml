@@ -1,0 +1,12 @@
+# 공통 계층 테스트는 실제 MySQL/Redis에 의존하거나 스키마를 변경하지 않는다.
+# DB/Flyway 통합 테스트는 기능별로 별도의 테스트 DB와 프로파일을 사용한다.
+spring:
+  autoconfigure:
+    exclude:
+      - org.springframework.boot.jdbc.autoconfigure.DataSourceAutoConfiguration
+      - org.springframework.boot.hibernate.autoconfigure.HibernateJpaAutoConfiguration
+      - org.springframework.boot.flyway.autoconfigure.FlywayAutoConfiguration
+  data:
+    redis:
+      repositories:
+        enabled: false
