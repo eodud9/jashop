@@ -68,7 +68,7 @@ Spring Security 필터의 401/403 응답 통합은 인증 구현 단계에서 �
 ## 2. Auth · User · Store
 
 **구현 상태(2026-11-09):** Store 및 User 영속성을 구현했다. User는 가입 대기 생성과 Repository까지 제공한다.
-이 절의 Store API와 User/Auth API는 아직 구현되지 않았다.
+공개 회원가입 API는 구현했다. Store API와 나머지 User/Auth API는 미구현이다.
 
 ### 2.1 엔드포인트
 
@@ -116,6 +116,16 @@ Spring Security 필터의 401/403 응답 통합은 인증 구현 단계에서 �
 ```
 
 **확정:** 가입 요청에 `role`, `homeStoreId`를 받지 않는다. 계정 승인 권한은 MANAGER에게만 있다. 이메일 정규화, 중복 DB UNIQUE, 비밀번호 안전한 해시가 필요하다.
+
+**구현(Phase 2-2B):**
+- 이름은 공백만 입력할 수 없으며 최대 100자다.
+- 이메일은 앞뒤 공백 제거·Locale.ROOT 소문자화 후 필수값·형식·최대 254자를 검증한다. 실제 메일 소유 확인은 구현하지 않았다.
+- 비밀번호는 공백만 입력할 수 없으며 8~72자, UTF-8 인코딩 시 최대 72바이트다. 앞뒤 공백을 보존하며 문자 종류 조합은 강제하지 않는다.
+- `name`, `email`, `password` 이외의 필드는 무시하지 않고 400 `VALIDATION_FAILED`로 거부한다. 잘못된 JSON·입력 검증 실패도 같은 공통 오류 형식이다. 입력 원문은 오류 응답에 포함하지 않는다.
+- 사전 이메일 중복 검사와 DB `uk_users_email` UNIQUE 위반을 모두 409 `DUPLICATE_EMAIL`로 처리한다. 다른 DB 제약 오류를 이메일 중복으로 바꾸지 않는다.
+- 성공은 201과 위 6개 필드의 DTO만 반환한다. 비밀번호·해시·토큰을 반환하지 않고 로그인 세션도 만들지 않는다. 조회용 사용자 API가 아직 없으므로 Location 헤더는 생략한다.
+- 해시는 Spring Security DelegatingPasswordEncoder + BCrypt 비용 12를 사용해 `{bcrypt}` 접두사와 함께 저장한다. Salt는 매번 자동 생성된다.
+- 공개 보안 체인은 해당 POST 경로에만 매칭되고 STATELESS이며 해당 체인에서만 CSRF 검사를 제외한다. 다른 경로의 기존 기본 인증·CSRF 정책은 유지한다. JWT·계정 승인·Refresh·로그아웃 기능은 아직 없다.
 
 ### 2.3 승인 — POST `/admin/users/{id}/approve`
 

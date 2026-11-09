@@ -1,9 +1,9 @@
 # 05. 기술 아키텍처 및 개발 환경
 
-**설계 기준일:** 2026-11-05 · **구현 대조일:** 2026-11-07.
+**설계 기준일:** 2026-11-05 · **구현 대조일:** 2026-11-09.
 **[현재]**는 저장소 코드로 확인한 구성, **[권장]**은 미적용 제안이다.
-공통 기반과 Store·User 영속성까지 구현했으며, 아래 목표 아키텍처 전체가 구현된 것은 아니다.
-테스트·로컬 기동 결과는 2026-11-07 실행 기록이며 이번 문서 정리에서 재실행하지 않았다.
+공통 기반과 Store·User 영속성 및 회원가입 API까지 구현했으며, 아래 목표 아키텍처 전체가 구현된 것은 아니다.
+로컬 기동 결과는 2026-11-07 기록이다. 2026-11-09 회원가입 구현 후 전체 테스트 79건을 통과했으며, 이는 기존 Compose DB 기동 검증과 별개다.
 
 ## 1. 현 저장소와 기술 환경
 
@@ -85,7 +85,7 @@ flowchart TB
 Phase 2-1에서 `store.domain.Store`와 `store.infrastructure.StoreRepository`를 추가했다.
 User에 `user.domain.User`/역할·상태 enum과 `user.infrastructure.UserRepository`를 추가했다.
 나머지 기능 패키지 및 `global.security`, `global.support`는 `package-info.java`만 존재한다.
-아래 트리의 주석은 각 패키지의 목표 책임이며, Clock·오류 처리·Store/User 영속성 외 코드는 미구현이다.
+아래 트리의 주석은 각 패키지의 목표 책임이며, Clock·오류 처리·Store/User 영속성 및 회원가입 API 외 코드는 미구현이다.
 기능별 api/application/domain/infrastructure는 해당 기능 구현 시 필요한 만큼 추가한다.
 
 Spring Boot는 **package-by-feature**를 기본으로 하고, 너무 이른 시기에 각 기능을 복잡한 멀티모듈로 쪼개지 않는다.
@@ -211,7 +211,8 @@ DB_USERNAME은 필요할 때 지정하며 기본값은 jashop이다. 현재 DB U
 - Flyway가 스키마를 생성/변경하고 JPA는 validate만 수행한다. 적용된 V1은 수정하지 않는다.
 - 이력 없는 비어 있지 않은 DB는 자동 baseline하지 않는다. 기존 스키마를 검토한 후 도입한다.
 - V2는 users를 추가하며 User는 ID 기반 매장/승인자 참조와 문자열 enum을 사용한다. `@JdbcTypeCode(VARCHAR)`로 MySQL native ENUM 대신 ERD의 VARCHAR 매핑을 유지한다.
-- Store API/Service, 회원가입·승인·인증·인가 서비스는 미구현이다.
+- 회원가입은 `auth.api` DTO/Controller → `auth.application.SignupService` → `UserRepository`로 구성한다. 서비스 트랜잭션에서 BCrypt 해시와 Clock 시각을 사용하며 saveAndFlush로 동시 중복 예외를 변환한다.
+- Store API/Service, 승인·로그인·JWT·인가 서비스는 미구현이다.
 
 ### 5.2 테스트와 검증 기록
 
@@ -262,7 +263,14 @@ cd jashop-backend
 - Redis 데이터 보존이 필요하면 선언된 redis_data 볼륨을 서비스에 연결.
 - 환경별 연결 설정이 필요해지면 local 프로파일 또는 URL/호스트 환경변수 도입.
 
-## 6. 인증·인가 전략 [목표 · 미구현]
+## 6. 인증·인가 전략 [회원가입 구현 · 나머지 목표]
+
+**현재:** `PasswordConfig`는 DelegatingPasswordEncoder + BCrypt(12)를 제공한다. 기존 Security 의존성만 사용하며 새 라이브러리는 추가하지 않았다. 비밀번호 원문과 해시는 응답·DTO 문자열 표현에 노출하지 않는다.
+`SecurityConfig`는 가입 POST 전용 STATELESS 공개 체인과 기본 인증 체인을 분리한다. CSRF 제외는 가입 체인에만 적용하며, 나머지는 기존 Boot의 기본 인증·CSRF 정책을 유지한다. 이 기본 인증은 User 로그인 구현이 아니며 초기 MANAGER 부트스트랩을 대체하지 않는다. JWT 구현 단계에서 기본 인증 체인을 교체한다.
+
+비밀번호 길이 검증은 BCrypt의 72바이트 한계에서 조용한 잘림/런타임 오류를 방지한다. 비용 12의 운영 응답 시간과 부하는 배포 환경에서 별도로 측정한다.
+
+아래는 후속 인증·인가 목표다.
 
 1. **Access JWT:** 짧은 유효기간, issuer/audience/signature/expiration 검증. Access Token은 가급적 브라우저 메모리에만 보관.
 2. **Refresh:** MySQL AuthSession에서 해시로 관리, HttpOnly + Secure Cookie, rotate/revoke, 동시 회전·재사용 검출.

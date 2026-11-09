@@ -155,7 +155,8 @@ npm run dev
 - **완료(Phase 2-0/2-1):** 기존 DB 사전 점검, Store V1 마이그레이션·엔티티·Repository, UTC DATETIME(6) 매핑, 실제 MySQL 통합 테스트. 로컬 V1 적용 후 `stores` 행은 0개이며 임의 매장 시드는 없습니다.
 - **현재 소스:** 루트 `compose.yml` 및 `application.yaml` 연결 설정 존재. 공통 테스트는 외부 MySQL/Redis 없이 실행하도록 분리.
 - **완료(Phase 2-2A):** User 엔티티·역할/상태 enum·Repository, V2 users 마이그레이션, 이메일 정규화 및 MySQL 제약 검증. 로컬 운영 DB에 V2를 적용한 것은 아닙니다.
-- **진행 예정:** 회원가입·관리자 승인·인증, Store API와 인가, 나머지 업무 DDL·API·통합 테스트, PWA 화면 및 Web Push 실기기 검증, CI/CD·AWS 배포.
+- **완료(Phase 2-2B):** 공개 회원가입 API(`POST /api/v1/auth/signup`), DTO 검증, BCrypt 비밀번호 해시, 중복 이메일 409 처리. 가입자는 STAFF/PENDING/소속 없음으로 생성되며 토큰·세션은 발급하지 않습니다.
+- **진행 예정:** 관리자 승인·인증, Store API와 인가, 나머지 업무 DDL·API·통합 테스트, PWA 화면 및 Web Push 실기기 검증, CI/CD·AWS 배포.
 - **MVP 제외:** POS 연동, 자동 재고 차감, 불량·유실, 급여 계산, 인력 자동 추천, AI 음성/자연어 검색.
 
 각 기능의 **확정 정책과 구현 제안은 [결정 기록](docs/06-decisions.md)에서 구분**합니다. 코드와 문서가 달라지면 변경 이유와 테스트 결과를 함께 업데이트합니다.

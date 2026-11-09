@@ -4,7 +4,7 @@
 
 **구현 범위(2026-11-09 코드 기준):** 17개 목표 엔티티 중 Store와 User 영속성을 구현했다.
 Store의 이름 변경·비활성화와 Repository는 존재하며 Service/API는 없다.
-User는 가입 대기 생성·역할/상태 enum·Repository까지 구현했다. 회원가입 API, 승인·거절·비활성화 전이, AuthSession 및 나머지 업무 서비스는 설계 단계다.
+User는 가입 대기 생성·역할/상태 enum·Repository까지 구현했다. 회원가입 API와 비밀번호 해시 처리를 구현했다. 승인·거절·비활성화 전이, AuthSession 및 나머지 업무 서비스는 설계 단계다.
 공통 패키지나 ErrorCode에 해당 기능의 이름이 있어도 기능 구현 완료를 의미하지 않는다.
 
 ## 1. 도메인 경계와 핵심 책임
@@ -23,7 +23,7 @@ User는 가입 대기 생성·역할/상태 enum·Repository까지 구현했다.
 
 ### User
 
-**현재 구현:** `createPending(email, passwordHash, name, now)`만 제공하며 역할·소속·승인 정보를 외부 입력으로 받지 않는다. 이메일은 `strip()` 후 `Locale.ROOT`로 소문자화한다. 이메일 형식/비밀번호 입력 정책과 해시 생성은 후속 회원가입 계층의 책임이다. `homeStoreId`와 `approvedBy`는 ID 값으로 매핑하고 DB FK로 참조를 보호한다. 저장 시각은 Store와 동일한 UTC DATETIME(6)이다. 승인자 자격과 매장 인가는 후속 서비스에서 검증한다.
+**현재 구현:** `createPending(email, passwordHash, name, now)`만 제공하며 역할·소속·승인 정보를 외부 입력으로 받지 않는다. 이메일은 `strip()` 후 `Locale.ROOT`로 소문자화한다. 회원가입 DTO에서 이메일 형식과 비밀번호 8~72자·UTF-8 최대 72바이트를 검증하며, 가입 서비스에서 BCrypt 비용 12 해시를 생성한다. 비밀번호 공백은 제거하지 않는다. `homeStoreId`와 `approvedBy`는 ID 값으로 매핑하고 DB FK로 참조를 보호한다. 저장 시각은 Store와 동일한 UTC DATETIME(6)이다. 승인자 자격과 매장 인가는 후속 서비스에서 검증한다.
 
 - 식별: `id`, 유일한 `email`, 비밀번호 해시.
 - 프로필: `name`, `role`, `status`, `homeStoreId`, 가입/승인/비활성화 시각.
