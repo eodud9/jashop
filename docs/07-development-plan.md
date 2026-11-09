@@ -1,8 +1,8 @@
-# 07. StoreFlow 개발 계획 · 테스트 전략 · Codex 작업 지침
+# 07. jashop 개발 계획 · 테스트 전략 · Codex 작업 지침
 
 **설계 기준일:** 2026-11-05 · **구현 확인:** 2026-11-07.
-공통 기반과 Phase 2-0/2-1(Store 영속성) 구현·검증 완료.
-Store API, User/Auth 및 나머지 업무·배포는 미구현이다. 인프라별 검증 범위는 아래 기록을 따른다.
+공통 기반과 Phase 2-0/2-1(Store 영속성), Phase 2-2A(User 영속성) 구현. 상세 검증 기록은 각 절을 따른다.
+Store API, 회원가입/승인/Auth 및 나머지 업무·배포는 미구현이다. 인프라별 검증 범위는 아래 기록을 따른다.
 테스트 결과와 로컬 DB 점검은 2026-11-07 실행 기록이다. 이번 문서 정리는 소스와 저장된
 JUnit 결과를 대조했으며 테스트·컨테이너·DB 상태를 새로 실행하거나 점검한 것은 아니다.
 
@@ -40,12 +40,12 @@ JUnit 결과를 대조했으며 테스트·컨테이너·DB 상태를 새로 실
 
 ### 단계 0 — 인프라 준비
 
-- [x] 현재 `storeflow-backend/build.gradle`의 Java21/Spring Boot 4.1.2 확인.
+- [x] 현재 `jashop-backend/build.gradle`의 Java21/Spring Boot 4.1.2 확인.
 - [x] Gradle Wrapper 9.8.2에서 Java 21 / Boot 4.1.2 빌드·테스트 실행 확인.
 - [x] 루트 `.gitignore`에 `.env`, `.DS_Store`, `.idea/`, 빌드 산출물 제외. `.idea/`·`.DS_Store` Git 추적 항목 없음.
 - [x] 루트 `compose.yml`에 MySQL 8.4/Redis 서비스와 MySQL 영속 볼륨 구성.
 - [x] 루트 `.env.example`에 Compose 환경변수와 개발용 샘플 기록. 실제 `.env`는 Git 제외.
-- [x] `storeflow-backend/src/main/resources/application.yaml`에 DataSource/Redis 연결 설정. 별도 local 프로파일 파일은 없음.
+- [x] `jashop-backend/src/main/resources/application.yaml`에 DataSource/Redis 연결 설정. 별도 local 프로파일 파일은 없음.
 - [x] 2026-11-07 기존 MySQL/Redis 컨테이너 실행 상태 확인 및 전체 테스트 29건 통과 기록.
 - [x] 로컬 DB 자격 증명을 주입한 Spring Boot 비웹 기동 2회로 DB/Flyway/JPA 검증.
 - [ ] 일반 웹 모드의 HTTP·인증 동작 검증.
@@ -73,15 +73,15 @@ Compose의 .env는 백엔드에 자동 주입되지 않으므로 DB_PASSWORD 등
 인증 필터의 401/403 오류 계약은 후속 인증 단계에서 검증한다.
 실제 DB 통합 검증은 Phase 2-1에서 Store 범위에 한해 완료했으며 나머지 도메인은 미검증이다.
 
-Phase 1 당시 검증: `cd storeflow-backend`에서 `./gradlew test --offline` 실행,
+Phase 1 당시 검증: `cd jashop-backend`에서 `./gradlew test --offline` 실행,
 MVC 오류 계약 19건 + DB 비의존 컨텍스트 1건 = **20건 통과(실패/스킵 0)**.
 400/401/403/404/409/500/503, 405/406/415의 상태 보존, Bean Validation,
 잘못된 JSON, UTC 시각, 추적 ID 및 예외/입력값 비노출을 확인했다.
 
 ### 단계 2-0 — DB 도입 전 점검 (완료: 2026-11-07)
 
-- [x] 기존 `storeflow-mysql` 실행과 호스트 3308 연결 확인(MySQL 8.4.11).
-- [x] `information_schema`로 `storeflow` 테이블 0개, Flyway 이력 없음 확인.
+- [x] 이름 변경 전 기존 MySQL 컨테이너 실행과 호스트 3308 연결 확인(MySQL 8.4.11).
+- [x] `information_schema`로 이름 변경 전 스키마의 테이블 0개, Flyway 이력 없음 확인.
 - [x] 문자셋 utf8mb4 / collation utf8mb4_0900_ai_ci 확인.
 - [x] V1 적용 직전에도 빈 스키마임을 재확인. baseline/repair/clean 또는 기존 데이터·볼륨 삭제 없음.
 - [x] 통합 테스트는 기존 DB/볼륨과 분리된 일회성 Testcontainers MySQL 8.4로 구성.
@@ -118,18 +118,16 @@ MVC 오류 계약 19건 + DB 비의존 컨텍스트 1건 = **20건 통과(실패
 로컬 점검의 비웹 모드는 HTTP/API·Redis 기능 검증을 의미하지 않는다.
 Store Controller/Service/API와 User 도메인은 이번 범위에서 추가하지 않았다.
 
-### 단계 2-2 이후 및 단계 3 — User/Store API/Auth (미구현)
+### 단계 2-2 이후 및 단계 3 — User/Store API/Auth
 
-다음 권장 작업은 User 영속성과 회원가입을 두 단위로 나누는 것이다.
-이는 구현 예정 범위이며 아래 체크리스트의 완료를 의미하지 않는다.
+User 영속성(2-2A)을 구현했으며 다음 작업은 회원가입(2-2B)이다. 이후 체크리스트는 별도 완료 표시가 없으면 미구현이다.
 
 | 작업 | 구현 범위 | 완료 기준 |
 |---|---|---|
-| 2-2A User 영속성 | 새 V2 SQL, User/역할/상태, Repository. 기존 V1은 유지 | MySQL 저장·조회, 이메일 UNIQUE, Store FK, JPA validate |
+| 2-2A User 영속성 (구현) | 새 V2 SQL, User/역할/상태, Repository. 기존 V1은 유지 | MySQL 저장·조회, 이메일 UNIQUE, Store/승인자 FK, enum/소속 CHECK, JPA validate |
 | 2-2B 회원가입 | DTO, 비밀번호 해시, 가입 Service/Controller | STAFF/PENDING·소속 없음, 201/중복 409, 입력 검증·권한 상승 방지 |
 
-이메일 정규화, 비밀번호 입력 기준, 허용하지 않는 요청 필드 처리 방식은 관련 설계를 확인해
-구현 전에 구체화한다. 이후 초기 MANAGER/인가 기반, Store API, 승인 기능과 JWT를 단계별로 구현한다.
+이메일 정규화는 `strip()` + `Locale.ROOT` 소문자화로 구현했다. Repository 조회 전에도 `User.normalizeEmail()`을 사용한다. 비밀번호 입력 기준, 이메일 형식 검증, 허용하지 않는 요청 필드 처리 방식은 회원가입 API 구현 전에 구체화한다. 이후 초기 MANAGER/인가 기반, Store API, 승인 기능과 JWT를 단계별로 구현한다.
 
 - [ ] 가입 시 PENDING + STAFF 초기화; 역할/소속은 클라이언트 지정 불가.
 - [ ] 총괄 MANAGER 부트스트랩, 직원·부매니저 승인 시 homeStore 지정.
@@ -137,6 +135,13 @@ Store Controller/Service/API와 User 도메인은 이번 범위에서 추가하�
 - [ ] JWT Access 검증, Refresh 해시/회전/폐기, 로그아웃/비활성화.
 - [ ] HTTP-only Refresh Cookie, Origin/CSRF 방어, 실패 로그인 제한 검토.
 - [ ] 계정 비활성화 후 이전 JWT로 업무 API 접근 거부 확인.
+
+
+
+**Phase 2-2A 검증(2026-11-09):** 백엔드에서 `./gradlew test --offline` 실행, 전체 43건 통과(실패/스킵 0): 기존 공통 20 + Store 9 + User 단위 3 + User MySQL 통합 11.
+User 기본값·정규화·필드 경계, UTC 마이크로초 저장, 이메일 조회/UNIQUE, 매장·승인자 FK 및 삭제 제한, enum/ACTIVE 소속 CHECK, V1→V2 업그레이드와 커밋된 행의 재실행 보존을 확인했다.
+첫 실행에서 CHECK 위반 4건의 예외 타입 기대값이 실제 MySQL JDBC 반환과 달라 실패했다. 테스트를 오류 코드 3819·제약 이름 검증으로 수정한 뒤 전체 재실행에 성공했다.
+기존 V1 SQL은 변경하지 않았고 로컬 Compose DB/볼륨에 V2를 적용하지 않았다.
 
 ### 단계 4~5 — 근무
 
@@ -283,7 +288,7 @@ Mockito 기반 단위 테스트로 `PESSIMISTIC_WRITE`나 InnoDB 조건부 UPDAT
 ### 작업 요청 템플릿
 
 ```text
-StoreFlow의 <한 기능>을 구현해줘.
+jashop의 <한 기능>을 구현해줘.
 
 반드시 먼저 README.md와 아래 문서를 읽고 현재 코드를 검사해:
 - docs/01-requirements.md

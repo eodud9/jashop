@@ -1,7 +1,7 @@
 services:
   mysql:
     image: mysql:8.4
-    container_name: storeflow-mysql
+    container_name: jashop-mysql
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
       MYSQL_DATABASE: ${MYSQL_DATABASE}
@@ -15,7 +15,7 @@ services:
 
   redis:
     image: redis:7-alpine
-    container_name: storeflow-redis
+    container_name: jashop-redis
     ports:
       - "${REDIS_PORT}:6379"
     restart: unless-stopped

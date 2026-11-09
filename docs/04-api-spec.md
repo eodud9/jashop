@@ -67,7 +67,7 @@ Spring Security 필터의 401/403 응답 통합은 인증 구현 단계에서 �
 
 ## 2. Auth · User · Store
 
-**구현 상태(2026-11-07):** Phase 2-1은 Store 영속성만 구현했다.
+**구현 상태(2026-11-09):** Store 및 User 영속성을 구현했다. User는 가입 대기 생성과 Repository까지 제공한다.
 이 절의 Store API와 User/Auth API는 아직 구현되지 않았다.
 
 ### 2.1 엔드포인트

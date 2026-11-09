@@ -4,8 +4,7 @@
 - **17개 테이블은 확정된 도메인 구성**이며, 이 문서의 상세 SQL 타입·추가 컬럼·인덱스는 구현 기준안이다.
 - 실제 구현 전 Flyway DDL을 작성하고 MySQL Testcontainers로 검증한다. **이 문서 자체가 이미 실행된 마이그레이션은 아니다.**
 
-**구현 상태(2026-11-07):** `V1__create_stores.sql`에 아래 `stores`만 구현했다.
-기존 로컬 스키마가 비어 있음을 확인하고 V1을 적용했으며 나머지 16개 업무 테이블은 미구현이다.
+**구현 상태(2026-11-09):** V1 `stores`와 V2 `users`를 구현했다. 나머지 15개 업무 테이블은 미구현이다. V2는 별도 Testcontainers MySQL에서 검증하며 기존 로컬 DB에 자동 적용하지 않는다.
 Flyway 이력 테이블은 업무 엔티티 17개와 별개의 도구 관리 테이블이다.
 
 ## 1. 공통 규칙
@@ -260,6 +259,8 @@ Java의 생성/수정 시각은 `Instant`, JDBC는 UTC로 해석하는 TIMESTAMP
 | `updated_at` | `DATETIME(6)` | NOT NULL | 수정 시각 |
 
 ### 02. `users` — 계정·권한·기본 소속
+
+구현: `V2__create_users.sql`, InnoDB / utf8mb4 / utf8mb4_0900_ai_ci. 이메일 UNIQUE, 매장/승인자 FK(자동 연쇄 삭제 없음), 역할·상태 CHECK 및 ACTIVE 직원/부매니저의 소속 필수 CHECK를 적용했다. `(status, home_store_id, role)` 인덱스를 둔다. enum은 VARCHAR 문자열로 저장한다. 이메일 비교는 DB collation도 따르며 이메일 정규화와 동일한 의미의 이진 비교는 아니다. 승인자의 MANAGER 여부와 매장 활성 여부는 FK만으로 보장하지 않으며 후속 서비스에서 검증한다.
 
 | 컬럼 | MySQL 타입(권장) | 제약 | 의미 |
 |---|---|---|---|

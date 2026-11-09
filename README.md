@@ -1,4 +1,4 @@
-# StoreFlow
+# jashop
 
 > **현장 경험에서 출발한 다중 매장 직원 협업 플랫폼**  
 > 설계 기준: 2026-11-05 · 상태: **설계 완료 / 초기 개발 진행 중** · 백엔드 중심 개인 프로젝트
@@ -7,11 +7,11 @@
 
 실제 롯데 자이언츠 상품 매장에서 부매니저로 근무하며 겪었던 문제에서 출발했습니다. 다섯 개 매장을 운영하면서 POS 수량과 실제 수량이 다른 경우가 있었고, 창고에 직접 다녀오는 데 한 번에 약 10분이 걸리기도 했습니다. 현재 누가 어느 매장에서 근무하는지, 어떤 직원이 확인 업무를 맡았는지 빠르게 파악하기도 어려웠습니다.
 
-StoreFlow는 **실시간 POS 재고 시스템이 아닙니다.** 마지막으로 직원이 직접 확인한 수량·위치·시각을 공유하고, 필요한 확인 업무를 책임 있게 배분하는 **업무 협업 플랫폼**입니다.
+jashop는 **실시간 POS 재고 시스템이 아닙니다.** 마지막으로 직원이 직접 확인한 수량·위치·시각을 공유하고, 필요한 확인 업무를 책임 있게 배분하는 **업무 협업 플랫폼**입니다.
 
 ## 해결하려는 문제
 
-| 현장 문제 | StoreFlow의 해결 방식 |
+| 현장 문제 | jashop의 해결 방식 |
 |---|---|
 | 상품이 여러 매장·공용 창고에 흩어져 있음 | 매장 내부 창고와 공용 `외부창고`, `143`를 구분해 위치별 마지막 확인값 조회 |
 | 상품 수량을 확인하려면 창고로 직접 이동해야 함 | 현장 직원에게 확인 요청을 보내고 한 명이 수락·완료하도록 업무 처리 |
@@ -79,7 +79,7 @@ flowchart LR
 ## 저장소 구조
 
 ```text
-storeflow/
+jashop/
 ├── README.md
 ├── docs/
 │   ├── 01-requirements.md
@@ -89,15 +89,15 @@ storeflow/
 │   ├── 05-architecture.md
 │   ├── 06-decisions.md
 │   └── 07-development-plan.md
-├── storeflow-backend/        # 생성된 Spring Boot 프로젝트
+├── jashop-backend/        # 생성된 Spring Boot 프로젝트
 │   ├── build.gradle
 │   ├── gradlew
 │   └── src/
-└── storeflow-frontend/       # 생성된 React/Vite 프로젝트
+└── jashop-frontend/       # 생성된 React/Vite 프로젝트
 ```
 
 로컬 인프라는 루트 `compose.yml`, 백엔드 연결은 `application.yaml`에 구성되어 있습니다.
-Flyway `db/migration/V1__create_stores.sql`로 `stores`만 생성하며, 이후 DDL은 기능별로 추가합니다.
+Flyway V1은 `stores`, V2는 `users`를 생성하며, 이후 DDL은 기능별로 추가합니다.
 기존 문서에 적힌 `backend/`, `frontend/` 대신 **현재 저장소의 실제 폴더명**을 기준으로 합니다.
 
 ## 로컬 실행
@@ -108,24 +108,25 @@ Flyway `db/migration/V1__create_stores.sql`로 `stores`만 생성하며, 이후 
 docker compose up -d
 
 # 백엔드
-cd storeflow-backend
+cd jashop-backend
 ./gradlew --version
 ./gradlew test
 ./gradlew bootRun
 
 # 다른 터미널에서 프론트엔드
-cd storeflow-frontend
+cd jashop-frontend
 npm ci
 npm run dev
 ```
 
 - MySQL·Redis 연결 URL과 비밀번호는 개발용 환경변수 또는 Git에 포함하지 않는 `.env`로 주입합니다.
-- 현재 `application.yaml`은 MySQL `localhost:3308/storeflow`, `${DB_USERNAME:storeflow}`, `${DB_PASSWORD}`를 사용합니다. Compose 포트/계정과 일치해야 합니다.
+- 현재 `application.yaml`은 MySQL `localhost:3308/jashop`, `${DB_USERNAME:jashop}`, `${DB_PASSWORD}`를 사용합니다. Compose 포트/계정과 일치해야 합니다.
 - Compose가 읽는 `.env`는 Gradle/Spring에 자동 전달되지 않습니다. `bootRun` 실행 환경에도 DB 계정과 `DB_PASSWORD`를 설정해야 합니다.
-- `./gradlew`는 **`storeflow-backend/`** 아래에서 실행합니다.
+- 프로젝트 이름 변경은 기존 MySQL 스키마·계정·Docker 컨테이너·볼륨을 자동으로 변경하지 않습니다. 루트 폴더명 변경으로 Compose 프로젝트명과 기본 볼륨명도 달라집니다. 기존 데이터를 사용할 때는 기존 볼륨과 DB 연결 설정을 명시적으로 맞춘 뒤 실행하며, 볼륨을 삭제해 초기화하지 않습니다. 새 `jashop` 스키마·계정으로 데이터를 이전하는 작업은 별도로 수행합니다.
+- `./gradlew`는 **`jashop-backend/`** 아래에서 실행합니다.
 - 전체 테스트에는 Docker가 필요합니다. Testcontainers가 기존 Compose DB/볼륨과 분리된 MySQL 8.4를 생성하며, Docker가 없으면 통합 테스트는 실패합니다(자동 스킵 없음).
 - 2026-11-07 `./gradlew test`로 **29건 통과**: 공통 20건 + 실제 MySQL Store 영속성/마이그레이션 9건. 기존 공통 테스트는 계속 외부 DB와 분리됩니다.
-- 로컬 MySQL 8.4.11의 빈 `storeflow` 스키마에 V1 적용 후, 비웹 모드 기동을 두 번 실행해 최초 적용·재실행·JPA `validate`를 확인했습니다. HTTP API, Redis 기능, User 도메인은 이 검증에 포함되지 않습니다.
+- 이름 변경 전 로컬 MySQL 8.4.11의 빈 스키마에 V1 적용 후, 비웹 모드 기동을 두 번 실행해 최초 적용·재실행·JPA `validate`를 확인했습니다. HTTP API, Redis 기능, User 도메인은 이 검증에 포함되지 않습니다.
 
 ## 문서
 
@@ -153,7 +154,8 @@ npm run dev
 - **완료:** 요구사항·핵심 정책 합의, 17개 테이블 논리 설계, API 설계, 백엔드·프론트엔드 프로젝트 생성. Phase 1 공통 패키지·오류 응답·UTC Clock·Flyway 경로/안전 설정(2026-11-07).
 - **완료(Phase 2-0/2-1):** 기존 DB 사전 점검, Store V1 마이그레이션·엔티티·Repository, UTC DATETIME(6) 매핑, 실제 MySQL 통합 테스트. 로컬 V1 적용 후 `stores` 행은 0개이며 임의 매장 시드는 없습니다.
 - **현재 소스:** 루트 `compose.yml` 및 `application.yaml` 연결 설정 존재. 공통 테스트는 외부 MySQL/Redis 없이 실행하도록 분리.
-- **진행 예정:** User·회원가입·관리자 승인·인증, Store API와 인가, 나머지 업무 DDL·API·통합 테스트, PWA 화면 및 Web Push 실기기 검증, CI/CD·AWS 배포.
+- **완료(Phase 2-2A):** User 엔티티·역할/상태 enum·Repository, V2 users 마이그레이션, 이메일 정규화 및 MySQL 제약 검증. 로컬 운영 DB에 V2를 적용한 것은 아닙니다.
+- **진행 예정:** 회원가입·관리자 승인·인증, Store API와 인가, 나머지 업무 DDL·API·통합 테스트, PWA 화면 및 Web Push 실기기 검증, CI/CD·AWS 배포.
 - **MVP 제외:** POS 연동, 자동 재고 차감, 불량·유실, 급여 계산, 인력 자동 추천, AI 음성/자연어 검색.
 
 각 기능의 **확정 정책과 구현 제안은 [결정 기록](docs/06-decisions.md)에서 구분**합니다. 코드와 문서가 달라지면 변경 이유와 테스트 결과를 함께 업데이트합니다.

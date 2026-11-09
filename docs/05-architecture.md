@@ -2,37 +2,37 @@
 
 **설계 기준일:** 2026-11-05 · **구현 대조일:** 2026-11-07.
 **[현재]**는 저장소 코드로 확인한 구성, **[권장]**은 미적용 제안이다.
-공통 기반과 Store 영속성까지 구현했으며, 아래 목표 아키텍처 전체가 구현된 것은 아니다.
+공통 기반과 Store·User 영속성까지 구현했으며, 아래 목표 아키텍처 전체가 구현된 것은 아니다.
 테스트·로컬 기동 결과는 2026-11-07 실행 기록이며 이번 문서 정리에서 재실행하지 않았다.
 
 ## 1. 현 저장소와 기술 환경
 
 ```text
-storeflow/
+jashop/
 ├── README.md
 ├── docs/
 ├── compose.yml                 # MySQL/Redis 로컬 인프라
 ├── .env.example                # Compose 환경변수 샘플
-├── storeflow-backend/           # 실제 생성한 Spring Boot 프로젝트
+├── jashop-backend/           # 실제 생성한 Spring Boot 프로젝트
 │   ├── build.gradle
 │   ├── settings.gradle
 │   ├── gradlew
 │   ├── gradle/wrapper/
-│   └── src/main/java/com/storeflow/backend/
-└── storeflow-frontend/          # 실제 생성한 React/Vite 프로젝트
+│   └── src/main/java/com/jashop/backend/
+└── jashop-frontend/          # 실제 생성한 React/Vite 프로젝트
 ```
 
 **[현재] 저장소의 `build.gradle`과 Gradle Wrapper**:
 
 | 항목 | 확인 내용 |
 |---|---|
-| Group | `com.storeflow` |
+| Group | `com.jashop` |
 | Spring Boot | `4.1.2` |
 | Java Toolchain | `21` |
 | Build | Gradle Wrapper `9.8.2`, Groovy DSL, `io.spring.dependency-management` `1.1.7` |
 | Spring | Actuator, Data JPA, Data Redis, Security, Validation, Web MVC |
 | Driver | `com.mysql:mysql-connector-j` |
-| Migration | Flyway Starter + `flyway-mysql`, V1 stores |
+| Migration | Flyway Starter + `flyway-mysql`, V1 stores / V2 users |
 | Test | 분리된 Boot 4 Starter Test 모듈, JUnit Platform Launcher, Testcontainers MySQL |
 
 **실행 확인:** Java 21 / Spring Boot 4.1.2 / Gradle Wrapper 9.8.2에서 빌드·전체 테스트와
@@ -83,15 +83,16 @@ flowchart TB
 `package-info.java`로 구성했다. 실제 공통 코드는 `global.config.ClockConfig`와
 `global.error`의 ErrorCode/BusinessException/ApiError/GlobalExceptionHandler이다.
 Phase 2-1에서 `store.domain.Store`와 `store.infrastructure.StoreRepository`를 추가했다.
+User에 `user.domain.User`/역할·상태 enum과 `user.infrastructure.UserRepository`를 추가했다.
 나머지 기능 패키지 및 `global.security`, `global.support`는 `package-info.java`만 존재한다.
-아래 트리의 주석은 각 패키지의 목표 책임이며, Clock·오류 처리·Store 영속성 외 코드는 미구현이다.
+아래 트리의 주석은 각 패키지의 목표 책임이며, Clock·오류 처리·Store/User 영속성 외 코드는 미구현이다.
 기능별 api/application/domain/infrastructure는 해당 기능 구현 시 필요한 만큼 추가한다.
 
 Spring Boot는 **package-by-feature**를 기본으로 하고, 너무 이른 시기에 각 기능을 복잡한 멀티모듈로 쪼개지 않는다.
 
 ```text
-storeflow-backend/src/main/java/com/storeflow/backend/
-├── StoreflowBackendApplication.java
+jashop-backend/src/main/java/com/jashop/backend/
+├── JashopBackendApplication.java
 ├── global/
 │   ├── config/             # Clock, Jackson, CORS, OpenAPI, Redis
 │   ├── security/           # SecurityFilterChain, JWT, 인증 principal
@@ -124,7 +125,7 @@ inventory/
 
 ### 4.1 기존 의존성은 유지
 
-사용자가 만든 `build.gradle`의 다음 의존성은 StoreFlow에 적합하다.
+사용자가 만든 `build.gradle`의 다음 의존성은 jashop에 적합하다.
 
 ```gradle
 implementation 'org.springframework.boot:spring-boot-starter-actuator'
@@ -157,10 +158,10 @@ Spring Boot는 IntelliJ/Gradle로 실행하고, MySQL과 Redis는 루트 `compos
 
 | 항목 | 실제 저장소 구성 |
 |---|---|
-| MySQL | `mysql:8.4`, 컨테이너명 `storeflow-mysql` |
+| MySQL | `mysql:8.4`, 컨테이너명 `jashop-mysql` |
 | MySQL 포트 | `${MYSQL_PORT}:3306`, `.env.example`의 호스트 포트는 3308 |
 | MySQL 볼륨 | `mysql_data:/var/lib/mysql` |
-| Redis | `redis:7-alpine`, 컨테이너명 `storeflow-redis` |
+| Redis | `redis:7-alpine`, 컨테이너명 `jashop-redis` |
 | Redis 포트 | `${REDIS_PORT}:6379`, `.env.example`의 호스트 포트는 6379 |
 | Redis 볼륨 | 서비스에 연결하지 않음. 최상위 `redis_data` 선언만 존재 |
 | 포트 바인딩 | MySQL/Redis 모두 호스트 IP를 지정하지 않음 |
@@ -170,13 +171,13 @@ Spring Boot는 IntelliJ/Gradle로 실행하고, MySQL과 Redis는 루트 `compos
 MYSQL_PORT, REDIS_PORT의 개발용 샘플이 있다. 실제 `.env`는 Git 제외 대상이다.
 Compose가 읽는 `.env`는 Gradle/Spring Boot에 자동 전달되지 않는다.
 
-`storeflow-backend/src/main/resources/application.yaml`의 실제 설정:
+`jashop-backend/src/main/resources/application.yaml`의 실제 설정:
 
 ```yaml
 spring:
   datasource:
-    url: jdbc:mysql://localhost:3308/storeflow
-    username: ${DB_USERNAME:storeflow}
+    url: jdbc:mysql://localhost:3308/jashop
+    username: ${DB_USERNAME:jashop}
     password: ${DB_PASSWORD}
     driver-class-name: com.mysql.cj.jdbc.Driver
   jpa:
@@ -198,7 +199,7 @@ spring:
 ```
 
 Compose 계정/포트와 백엔드 설정을 일치시키고, 백엔드 실행 환경에 DB_PASSWORD를 주입한다.
-DB_USERNAME은 필요할 때 지정하며 기본값은 storeflow다. 현재 DB URL과 Redis 호스트/포트에는
+DB_USERNAME은 필요할 때 지정하며 기본값은 jashop이다. 현재 DB URL과 Redis 호스트/포트에는
 환경변수 placeholder가 없으므로 Compose 변수만 바꾸면 백엔드 연결 설정은 바뀌지 않는다.
 
 ### 5.1 Store 영속성과 Flyway
@@ -209,7 +210,8 @@ DB_USERNAME은 필요할 때 지정하며 기본값은 storeflow다. 현재 DB U
 - 코드에는 setter가 없고 이름 변경과 비활성화를 지원한다. 재비활성화는 기존 수정 시각을 보존한다.
 - Flyway가 스키마를 생성/변경하고 JPA는 validate만 수행한다. 적용된 V1은 수정하지 않는다.
 - 이력 없는 비어 있지 않은 DB는 자동 baseline하지 않는다. 기존 스키마를 검토한 후 도입한다.
-- Store API/Service, User, 인증·인가 서비스는 미구현이다.
+- V2는 users를 추가하며 User는 ID 기반 매장/승인자 참조와 문자열 enum을 사용한다. `@JdbcTypeCode(VARCHAR)`로 MySQL native ENUM 대신 ERD의 VARCHAR 매핑을 유지한다.
+- Store API/Service, 회원가입·승인·인증·인가 서비스는 미구현이다.
 
 ### 5.2 테스트와 검증 기록
 
@@ -224,7 +226,7 @@ Boot BOM 관리 Testcontainers 2.0.5로 `mysql:8.4`를 실행하며, 기존 Comp
 첫 실행 시 Gradle 의존성과 MySQL/Ryuk 이미지를 내려받으려면 네트워크가 필요할 수 있다.
 
 2026-11-07 저장된 JUnit 결과는 전체 29건 통과(공통 20 + MySQL 9, 실패/스킵 0)다.
-같은 날 로컬 MySQL 8.4.11의 빈 storeflow 스키마에 V1을 적용하고 비웹 기동 2회에서
+같은 날 이름 변경 전 로컬 MySQL 8.4.11의 빈 스키마에 V1을 적용하고 비웹 기동 2회에서
 최초 적용, 재실행 no-op, JPA validate를 확인했다. 당시 stores 행은 0개였다.
 기존 데이터/볼륨 삭제·재생성, baseline, repair, 임의 시드 입력은 수행하지 않았다.
 이는 해당 실행 시점의 기록이며 현재 DB 행 수나 컨테이너 실행 상태를 상시 보장하지 않는다.
@@ -238,7 +240,7 @@ docker compose -f compose.yml up -d
 docker compose -f compose.yml ps
 
 # 백엔드: 위 Compose 설정과 일치하는 DB_USERNAME/DB_PASSWORD를 실행 환경에 주입
-cd storeflow-backend
+cd jashop-backend
 ./gradlew --version
 ./gradlew test
 ./gradlew bootRun
@@ -273,7 +275,7 @@ cd storeflow-backend
 
 ## 7. Redis — 최근 조회 옵션 [목표 · 미구현]
 
-**키:** `storeflow:recent-products:user:{userId}` · **자료구조:** LIST · **최대 10개** · **TTL 예시:** 7일.
+**키:** `jashop:recent-products:user:{userId}` · **자료구조:** LIST · **최대 10개** · **TTL 예시:** 7일.
 
 제품 옵션 상세 조회 성공 후 `LREM(key,0,variantId)` → `LPUSH(key,variantId)` → `LTRIM(key,0,9)` → `EXPIRE(key,604800)` 작업을 Lua 또는 Redis 트랜잭션으로 원자화한다. 최근 목록 조회 API는 기록 목록을 변경하지 않는다.
 
