@@ -722,3 +722,10 @@ data: {"notificationId":9001,"type":"STOCK_CHECK_REQUESTED"}
 | 알림 타인 접근/매장 범위 우회 | 403/404 정책대로 거부 |
 
 **구현 후 업데이트할 항목:** 실제 요청 DTO 필드와 Bean Validation, 생성 API의 재시도 키 정책, 목록 페이지/커서 기준, 취소·예외 업무 API, Springdoc(OpenAPI) 경로 검증 결과. 세부 미결은 [06-decisions.md](06-decisions.md)에 유지한다.
+
+
+## 초기 관리자 생성 및 인가 구현 메모 (2026-11-10)
+
+초기 MANAGER 생성은 HTTP API가 아니다. README의 환경변수 기반 비웹 절차에서 한 번만 수행하며 기존 가입자를 승격하지 않는다. V3 잠금/완료 기록과 사용자 생성을 한 트랜잭션으로 처리한다. 이후 관리자 추가·승인은 별도 정책/후속 작업이다.
+UserAuthorizationService는 ACTIVE 확인, 총괄 전용 명령, 담당 매장 부매니저 전용 명령을 각각 검증한다. null/없는 인증 ID는 UNAUTHENTICATED, 비활성 등은 ACCOUNT_* 오류, 총괄 역할 부족은 ACCESS_DENIED, 담당 매장/역할 불일치는 STORE_ACCESS_DENIED다. MANAGER는 부매니저 전용 명령을 자동 우회하지 않는다.
+이 서비스의 입력 ID는 향후 검증된 principal에서 전달해야 하며 요청 본문의 userId로 인증을 대체하지 않는다. 아직 로그인/JWT·업무 API와 연결한 상태는 아니다. 부트스트랩 거부 BOOTSTRAP_NOT_ALLOWED는 내부 실행 오류이며 새로운 공개 엔드포인트는 추가하지 않았다.

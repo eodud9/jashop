@@ -1,8 +1,8 @@
 # 05. 기술 아키텍처 및 개발 환경
 
-**설계 기준일:** 2026-11-05 · **구현 대조일:** 2026-11-09.
+**설계 기준일:** 2026-11-05 · **구현 대조일:** 2026-11-10.
 **[현재]**는 저장소 코드로 확인한 구성, **[권장]**은 미적용 제안이다.
-공통 기반과 Store·User 영속성 및 회원가입 API까지 구현했으며, 아래 목표 아키텍처 전체가 구현된 것은 아니다.
+공통 기반과 Store·User 영속성, 회원가입 API, 초기 MANAGER 생성 및 인가 서비스까지 구현했으며, 아래 목표 아키텍처 전체가 구현된 것은 아니다.
 로컬 기동 결과는 2026-11-07 기록이다. 2026-11-09 회원가입 구현 후 전체 테스트 79건을 통과했으며, 이는 기존 Compose DB 기동 검증과 별개다.
 
 ## 1. 현 저장소와 기술 환경
@@ -32,7 +32,7 @@ jashop/
 | Build | Gradle Wrapper `9.8.2`, Groovy DSL, `io.spring.dependency-management` `1.1.7` |
 | Spring | Actuator, Data JPA, Data Redis, Security, Validation, Web MVC |
 | Driver | `com.mysql:mysql-connector-j` |
-| Migration | Flyway Starter + `flyway-mysql`, V1 stores / V2 users |
+| Migration | Flyway Starter + `flyway-mysql`, V1 stores / V2 users / V3 manager_bootstrap |
 | Test | 분리된 Boot 4 Starter Test 모듈, JUnit Platform Launcher, Testcontainers MySQL |
 
 **실행 확인:** Java 21 / Spring Boot 4.1.2 / Gradle Wrapper 9.8.2에서 빌드·전체 테스트와
@@ -59,7 +59,7 @@ flowchart TB
     NOTI[Notification Service · SSE]
     WORKER[Delivery Worker]
   end
-  MYSQL[(MySQL 8.4: 17 tables)]
+  MYSQL[(MySQL 8.4: 목표 업무 17 + 운영 1)]
   REDIS[(Redis: recent viewed variants)]
   PUSH[Web Push Services]
   UI -->|HTTPS REST| SEC
@@ -85,7 +85,7 @@ flowchart TB
 Phase 2-1에서 `store.domain.Store`와 `store.infrastructure.StoreRepository`를 추가했다.
 User에 `user.domain.User`/역할·상태 enum과 `user.infrastructure.UserRepository`를 추가했다.
 나머지 기능 패키지 및 `global.security`, `global.support`는 `package-info.java`만 존재한다.
-아래 트리의 주석은 각 패키지의 목표 책임이며, Clock·오류 처리·Store/User 영속성 및 회원가입 API 외 코드는 미구현이다.
+아래 트리의 주석은 각 패키지의 목표 책임이며, Clock·오류 처리·Store/User 영속성·회원가입·초기 관리자 생성·인가 서비스 외 코드는 미구현이다.
 기능별 api/application/domain/infrastructure는 해당 기능 구현 시 필요한 만큼 추가한다.
 
 Spring Boot는 **package-by-feature**를 기본으로 하고, 너무 이른 시기에 각 기능을 복잡한 멀티모듈로 쪼개지 않는다.
@@ -212,7 +212,7 @@ DB_USERNAME은 필요할 때 지정하며 기본값은 jashop이다. 현재 DB U
 - 이력 없는 비어 있지 않은 DB는 자동 baseline하지 않는다. 기존 스키마를 검토한 후 도입한다.
 - V2는 users를 추가하며 User는 ID 기반 매장/승인자 참조와 문자열 enum을 사용한다. `@JdbcTypeCode(VARCHAR)`로 MySQL native ENUM 대신 ERD의 VARCHAR 매핑을 유지한다.
 - 회원가입은 `auth.api` DTO/Controller → `auth.application.SignupService` → `UserRepository`로 구성한다. 서비스 트랜잭션에서 BCrypt 해시와 Clock 시각을 사용하며 saveAndFlush로 동시 중복 예외를 변환한다.
-- Store API/Service, 승인·로그인·JWT·인가 서비스는 미구현이다.
+- 초기 MANAGER 생성은 auth.bootstrap, 인가 서비스는 user.application에 구현했다. Store API/Service, 승인·로그인·JWT는 미구현이다.
 
 ### 5.2 테스트와 검증 기록
 
@@ -263,7 +263,7 @@ cd jashop-backend
 - Redis 데이터 보존이 필요하면 선언된 redis_data 볼륨을 서비스에 연결.
 - 환경별 연결 설정이 필요해지면 local 프로파일 또는 URL/호스트 환경변수 도입.
 
-## 6. 인증·인가 전략 [회원가입 구현 · 나머지 목표]
+## 6. 인증·인가 전략 [회원가입·부트스트랩·인가 서비스 구현]
 
 **현재:** `PasswordConfig`는 DelegatingPasswordEncoder + BCrypt(12)를 제공한다. 기존 Security 의존성만 사용하며 새 라이브러리는 추가하지 않았다. 비밀번호 원문과 해시는 응답·DTO 문자열 표현에 노출하지 않는다.
 `SecurityConfig`는 가입 POST 전용 STATELESS 공개 체인과 기본 인증 체인을 분리한다. CSRF 제외는 가입 체인에만 적용하며, 나머지는 기존 Boot의 기본 인증·CSRF 정책을 유지한다. 이 기본 인증은 User 로그인 구현이 아니며 초기 MANAGER 부트스트랩을 대체하지 않는다. JWT 구현 단계에서 기본 인증 체인을 교체한다.
@@ -279,7 +279,15 @@ cd jashop-backend
 5. **CORS/CSRF:** React 개발 서버 origin을 명시적으로 허용. Refresh 쿠키 요청은 CSRF 보호 및 `Origin` 검증을 적용. 일반 Access Bearer API도 신뢰 가능한 요청 출처를 검토.
 6. **보안 로그:** Refresh/Access 원문, 해시·비밀번호·구독 키·endpoint, 직원의 불필요한 개인정보 출력 금지.
 
-가입 대기 계정의 푸시 구독은 생성하지 않는다. 초기 MANAGER는 안전한 부트스트랩/운영자 설정으로만 생성한다.
+가입 대기 계정의 푸시 구독은 생성하지 않는다. 초기 MANAGER는 아래 운영자 전용 절차로만 생성한다.
+
+### 6.1 초기 관리자 생성 및 인가 기반 (2026-11-10)
+
+- 기본 비활성인 ManagerBootstrapRunner를 `JASHOP_BOOTSTRAP_ENABLED=true`와 명시적인 비웹 모드에서만 실행한다. SecurityConfig는 Servlet 웹 환경에만 적용한다.
+- V3의 단일 행을 잠그고 완료 이력 또는 기존 MANAGER(상태 무관)가 있으면 거부한다. 기존 이메일을 승격/덮어쓰기하지 않는다. 사용자와 완료 기록은 한 트랜잭션으로 저장하며 최초 관리자에게 승인자는 없다.
+- UserAuthorizationService의 requireActive/requireManager/requireStoreAssistantManager는 DB의 현재 계정 상태와 역할·homeStoreId를 검사한다. 부매니저 전용 명령에는 MANAGER도 자동 우회하지 않는다.
+- userId는 향후 검증된 principal에서 전달해야 한다. 아직 HTTP API/JWT에 연결하지 않았으며 매장 존재·활성, 현재 근무 위치 및 업무 상태 검증은 각 후속 명령에서 추가한다. 외부 트랜잭션의 JPA 영속성 컨텍스트를 무시하는 강제 재조회나 권한 변경과 명령 사이의 동시성 잠금은 제공하지 않는다.
+- 실행 방법과 비밀값 주입은 README의 초기 관리자 절차를 따른다.
 
 ## 7. Redis — 최근 조회 옵션 [목표 · 미구현]
 

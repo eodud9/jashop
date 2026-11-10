@@ -5,7 +5,8 @@
 - 실제 구현 전 Flyway DDL을 작성하고 MySQL Testcontainers로 검증한다. **이 문서 자체가 이미 실행된 마이그레이션은 아니다.**
 
 **구현 상태(2026-11-09):** V1 `stores`와 V2 `users`를 구현했다. 나머지 15개 업무 테이블은 미구현이다. V2는 별도 Testcontainers MySQL에서 검증하며 기존 로컬 DB에 자동 적용하지 않는다.
-Flyway 이력 테이블은 업무 엔티티 17개와 별개의 도구 관리 테이블이다.
+V3 `manager_bootstrap` 운영 테이블을 추가했다(2026-11-10). `id TINYINT PK CHECK(id=1)`, `user_id BIGINT NULL FK users(id)`, `completed_at DATETIME(6) NULL`이며 사용자/완료 시각은 둘 다 NULL 또는 둘 다 NOT NULL이다. 초기 id=1 행을 생성하고 FOR UPDATE로 잠근 뒤 사용자 생성과 완료 기록을 한 트랜잭션으로 커밋한다. 완료 기록은 관리자 비활성화 후에도 보존한다.
+목표 테이블은 업무 17개 + 운영 1개다. Flyway 이력 테이블은 이와 별개의 도구 관리 테이블이다.
 
 ## 1. 공통 규칙
 

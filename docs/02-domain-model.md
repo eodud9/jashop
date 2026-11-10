@@ -17,13 +17,13 @@ User는 가입 대기 생성·역할/상태 enum·Repository까지 구현했다.
 | Catalog & Stock | Product, ProductVariant, StorageLocation, StockRecord, StockCheckRequest, StockVerification | 상품 옵션·위치·마지막 수동 확인값·확인 업무·이력 |
 | Notification | Notification, PushSubscription, NotificationDelivery | 알림함, 브라우저 구독, 비동기 전송·재시도 |
 
-**총 17개 MySQL 테이블**이다. 공통 감사/Outbox/권한 매핑 테이블은 MVP의 확정된 17개 목록에 없다. 향후 필요하면 별도 ADR 후 추가한다.
+**업무 도메인은 총 17개 MySQL 테이블**이다. 초기 관리자 일회성 생성 보호용 운영 테이블 `manager_bootstrap`은 별도로 추가했다(D-20261110-01). 목표는 업무 17개 + 운영 1개이며 Flyway 이력은 별도다.
 
 ## 2. 사용자·매장 모델
 
 ### User
 
-**현재 구현:** `createPending(email, passwordHash, name, now)`만 제공하며 역할·소속·승인 정보를 외부 입력으로 받지 않는다. 이메일은 `strip()` 후 `Locale.ROOT`로 소문자화한다. 회원가입 DTO에서 이메일 형식과 비밀번호 8~72자·UTF-8 최대 72바이트를 검증하며, 가입 서비스에서 BCrypt 비용 12 해시를 생성한다. 비밀번호 공백은 제거하지 않는다. `homeStoreId`와 `approvedBy`는 ID 값으로 매핑하고 DB FK로 참조를 보호한다. 저장 시각은 Store와 동일한 UTC DATETIME(6)이다. 승인자 자격과 매장 인가는 후속 서비스에서 검증한다.
+**현재 구현:** `createPending(email, passwordHash, name, now)`로 일반 가입을 생성하며 역할·소속·승인 정보를 외부 입력으로 받지 않는다. 이메일은 `strip()` 후 `Locale.ROOT`로 소문자화한다. 회원가입 DTO에서 이메일 형식과 비밀번호 8~72자·UTF-8 최대 72바이트를 검증하며, 가입 서비스에서 BCrypt 비용 12 해시를 생성한다. 비밀번호 공백은 제거하지 않는다. `homeStoreId`와 `approvedBy`는 ID 값으로 매핑하고 DB FK로 참조를 보호한다. 저장 시각은 Store와 동일한 UTC DATETIME(6)이다. 운영 전용 `createInitialManager`는 ACTIVE/MANAGER/소속 없음으로 생성한다. 초기 관리자의 approvedBy/approvedAt은 null이며 생성 근거는 manager_bootstrap에 기록한다. UserAuthorizationService는 ACTIVE 상태와 총괄/담당 매장 부매니저 권한을 검증한다. 일반 승인 상태 전이는 후속 작업이다.
 
 - 식별: `id`, 유일한 `email`, 비밀번호 해시.
 - 프로필: `name`, `role`, `status`, `homeStoreId`, 가입/승인/비활성화 시각.

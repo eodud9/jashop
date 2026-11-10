@@ -97,7 +97,7 @@ jashop/
 ```
 
 로컬 인프라는 루트 `compose.yml`, 백엔드 연결은 `application.yaml`에 구성되어 있습니다.
-Flyway V1은 `stores`, V2는 `users`를 생성하며, 이후 DDL은 기능별로 추가합니다.
+Flyway V1은 `stores`, V2는 `users`, V3은 초기 관리자 생성 보호용 `manager_bootstrap`을 생성하며, 이후 DDL은 기능별로 추가합니다.
 기존 문서에 적힌 `backend/`, `frontend/` 대신 **현재 저장소의 실제 폴더명**을 기준으로 합니다.
 
 ## 로컬 실행
@@ -128,6 +128,23 @@ npm run dev
 - 2026-11-07 `./gradlew test`로 **29건 통과**: 공통 20건 + 실제 MySQL Store 영속성/마이그레이션 9건. 기존 공통 테스트는 계속 외부 DB와 분리됩니다.
 - 이름 변경 전 로컬 MySQL 8.4.11의 빈 스키마에 V1 적용 후, 비웹 모드 기동을 두 번 실행해 최초 적용·재실행·JPA `validate`를 확인했습니다. HTTP API, Redis 기능, User 도메인은 이 검증에 포함되지 않습니다.
 
+## 초기 MANAGER 생성
+
+회원가입 API로 총괄 권한을 취득할 수 없다. 최초 운영자만 별도의 비웹 부트스트랩으로 생성한다.
+기존 MANAGER가 있거나 생성 완료 기록이 있으면 재실행을 거부하며 기존 계정의 승격·비밀번호 재설정은 하지 않는다.
+
+1. 대상 DB와 DB_USERNAME/DB_PASSWORD를 확인한다. 이 명령은 대상 DB에 미적용 Flyway 마이그레이션(V3 포함)을 적용한다.
+2. `JASHOP_BOOTSTRAP_NAME`, `JASHOP_BOOTSTRAP_EMAIL`, `JASHOP_BOOTSTRAP_PASSWORD`를 실행 환경에 주입한다. 비밀번호는 회원가입과 동일하게 8~72자/UTF-8 최대 72바이트다. 비밀 관리 도구나 터미널의 숨김 입력을 사용하고 명령행 인자·소스·공유 로그에 비밀번호를 기록하지 않는다.
+3. 백엔드 디렉터리에서 다음을 실행한다. 부트스트랩은 기본 비활성이며 비웹 모드를 명시해야 한다.
+
+```bash
+JASHOP_BOOTSTRAP_ENABLED=true ./gradlew --no-daemon bootRun --args='--spring.main.web-application-type=none --spring.data.redis.repositories.enabled=false'
+```
+
+성공 시 `ACTIVE/MANAGER` 계정과 생성 완료 기록을 같은 트랜잭션으로 저장한다. 기본 소속 매장과 승인자/승인 시각은 없고 완료 기록의 user_id/completed_at이 운영자 생성 근거다. 완료 기록을 지우거나 기존 계정을 자동 변경하지 않는다. 실행 후 부트스트랩 환경변수, 특히 비밀번호를 실행 환경에서 제거한다. 웹 서버는 일반 실행 환경으로 별도 기동한다.
+
+현재 로그인/JWT는 미구현이므로 생성된 관리자 계정으로 웹 로그인을 할 수는 없다. 이번 구현에서는 기존 Compose DB에 마이그레이션을 적용하거나 실제 관리자 계정을 생성하지 않았다.
+
 ## 문서
 
 | 문서 | 내용 |
@@ -156,7 +173,8 @@ npm run dev
 - **현재 소스:** 루트 `compose.yml` 및 `application.yaml` 연결 설정 존재. 공통 테스트는 외부 MySQL/Redis 없이 실행하도록 분리.
 - **완료(Phase 2-2A):** User 엔티티·역할/상태 enum·Repository, V2 users 마이그레이션, 이메일 정규화 및 MySQL 제약 검증. 로컬 운영 DB에 V2를 적용한 것은 아닙니다.
 - **완료(Phase 2-2B):** 공개 회원가입 API(`POST /api/v1/auth/signup`), DTO 검증, BCrypt 비밀번호 해시, 중복 이메일 409 처리. 가입자는 STAFF/PENDING/소속 없음으로 생성되며 토큰·세션은 발급하지 않습니다.
-- **진행 예정:** 관리자 승인·인증, Store API와 인가, 나머지 업무 DDL·API·통합 테스트, PWA 화면 및 Web Push 실기기 검증, CI/CD·AWS 배포.
+- **완료(Phase 2-2C):** 운영 전용 초기 MANAGER 일회성 생성, DB 잠금/완료 기록, 계정 상태·총괄·담당 매장 부매니저 인가 서비스.
+- **진행 예정:** 관리자 승인·인증, Store API 및 인가 서비스 연결, 나머지 업무 DDL·API·통합 테스트, PWA 화면 및 Web Push 실기기 검증, CI/CD·AWS 배포.
 - **MVP 제외:** POS 연동, 자동 재고 차감, 불량·유실, 급여 계산, 인력 자동 추천, AI 음성/자연어 검색.
 
 각 기능의 **확정 정책과 구현 제안은 [결정 기록](docs/06-decisions.md)에서 구분**합니다. 코드와 문서가 달라지면 변경 이유와 테스트 결과를 함께 업데이트합니다.

@@ -80,6 +80,15 @@ public class User {
         return new User(email, passwordHash, name, now);
     }
 
+    /** 운영자 전용 부트스트랩 서비스에서만 호출한다. 일반 가입/승인에서 사용하지 않는다. */
+    public static User createInitialManager(String email, String passwordHash, String name, Instant now) {
+        User user = new User(email, passwordHash, name, now);
+        user.role = UserRole.MANAGER;
+        user.status = UserStatus.ACTIVE;
+        // 최초 운영자에게 승인자는 없다. 생성 근거는 별도 bootstrap 기록으로 보존한다.
+        return user;
+    }
+
     public static String normalizeEmail(String email) {
         String value = Objects.requireNonNull(email, "email").strip().toLowerCase(Locale.ROOT);
         return requireText(value, 254, "email");
