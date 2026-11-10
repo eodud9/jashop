@@ -248,3 +248,15 @@
 - 인가: UserAuthorizationService가 DB 사용자 상태와 역할/homeStoreId를 검증한다. requireActive, requireManager, requireStoreAssistantManager를 분리한다. 총괄에게 부매니저 전용 승인·배정 명령을 자동 허용하지 않는다. 타 매장/소속 없음은 거부한다.
 - 한계: 로그인/JWT 및 기존 기본 인증과의 사용자 연결, 일반 승인/매장 API, 매장 활성·존재 및 현재 근무/업무 상태 검증은 후속 구현이다. 인증된 principal의 ID만 전달해야 한다. 현재 인가 조회는 외부 트랜잭션의 영속성 컨텍스트를 강제 갱신하거나 업무 명령과 권한 변경 사이의 잠금을 제공하지 않는다. 기존 Compose DB/볼륨 및 실제 계정은 변경하지 않았다.
 - 검증: `./gradlew test --offline` 전체 99건 통과(기존 79 + 신규 20, 실패/오류/스킵 0). MySQL 동시 생성·롤백·DB 권한 변경 반영을 검증했다. 최초 AssertJ 인자 오류 및 테스트용 트리거 권한 오류는 수정 후 해결했다.
+
+
+### D-20261110-02: Store API의 페이지 조회·행 잠금·인가 계약
+
+- 상태: 채택. 사용자 요청으로 페이지/활성 여부 필터/ID 정렬 및 동일 매장 변경의 행 잠금을 확정했다.
+- 선택: Store 목록/상세/생성/이름 변경/비활성화 5개 API를 DTO와 서비스로 구현했다. 목록 기본 page=0/size=20/active=true, 최대 size=100, 정렬은 id ASC 고정이다. 비활성은 active=false로 조회하며 상세는 활성 여부와 무관하게 조회한다. 코드와 이름의 기존 문자열 처리·비활성화 규칙은 유지한다.
+- 인가: 조회는 requireActive, 변경은 requireManager를 서비스 트랜잭션 안에서 호출한다. 매장 공통 마스터 변경에는 부매니저의 담당 매장 권한을 사용하지 않는다. UserPrincipal을 인증 사용자 계약으로 추가하고 Authentication의 인증 완료와 principal 타입을 확인한다. 요청 본문/쿼리/임의 헤더의 userId를 사용하지 않는다.
+- 보안: Store 전용 STATELESS 체인에는 Basic/Form 인증을 제공하지 않으며 CSRF는 유지한다. 필터 오류도 공통 ApiError로 응답한다. 부트스트랩 계정 생성이 실제 HTTP 로그인을 가능하게 하는 것은 아니며, 로그인/JWT 제공자는 후속 작업이다. 테스트 인증 객체는 테스트에서만 주입한다.
+- 동시성: 이름 변경/비활성화는 findByIdForUpdate(PESSIMISTIC_WRITE)로 대상 Store 행을 잠근 뒤 dirty checking으로 변경한다. 같은 매장 변경은 직렬화하고 다른 매장 변경과 일반 조회는 막지 않는다. 생성은 사전 중복 검사와 uk_stores_code로 보호하며 동시 UNIQUE 위반도 DUPLICATE_STORE_CODE/409로 변환한다. 기존 MySQL collation을 그대로 따른다.
+- 이유: 기존 엔티티의 변경 규칙과 JPA/DB 제약을 재사용한다. 페이지 응답은 Spring Page 직렬화에 의존하지 않는 DTO로 고정했다. 잠금은 검증과 변경을 묶어 이름 변경이 비활성 상태를 덮어쓰는 일을 막는다. 새 라이브러리나 스키마 변경이 필요 없어 V1~V3는 유지한다.
+- 한계: 인증 제공자·사용자 승인·현재 근무자 조회는 미구현이다. Store 잠금은 사용자 권한 변경까지 잠그지 않으며 대기 시간은 MySQL 설정을 따른다. 기존 Compose DB/볼륨은 변경하지 않는다.
+- 검증: `./gradlew test --offline` 전체 142건 통과(기존 99 + 신규 43, 실패/오류/스킵 0). 실제 MySQL 잠금 대기/다른 매장 진행, 동시 코드 생성, 동시 이름 변경·비활성화 및 운영 보안 필터를 검증했다. 미인증 Authentication의 403 응답 1건은 401로 구분하도록 수정한 뒤 해결했다.

@@ -1,4 +1,4 @@
 /**
- * 인증 및 인가 기반 구성. 실제 구현은 인증 단계에서 추가한다.
+ * 비밀번호 해시, 인증 사용자 식별 계약 및 HTTP 보안 설정. 로그인/JWT 제공자는 후속 구현한다.
  */
 package com.jashop.backend.global.security;

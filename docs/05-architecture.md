@@ -2,7 +2,7 @@
 
 **설계 기준일:** 2026-11-05 · **구현 대조일:** 2026-11-10.
 **[현재]**는 저장소 코드로 확인한 구성, **[권장]**은 미적용 제안이다.
-공통 기반과 Store·User 영속성, 회원가입 API, 초기 MANAGER 생성 및 인가 서비스까지 구현했으며, 아래 목표 아키텍처 전체가 구현된 것은 아니다.
+공통 기반과 Store·User 영속성, 회원가입 API, 초기 MANAGER 생성·인가 서비스 및 Store 조회/관리 API까지 구현했으며, 아래 목표 아키텍처 전체가 구현된 것은 아니다.
 로컬 기동 결과는 2026-11-07 기록이다. 2026-11-09 회원가입 구현 후 전체 테스트 79건을 통과했으며, 이는 기존 Compose DB 기동 검증과 별개다.
 
 ## 1. 현 저장소와 기술 환경
@@ -85,7 +85,7 @@ flowchart TB
 Phase 2-1에서 `store.domain.Store`와 `store.infrastructure.StoreRepository`를 추가했다.
 User에 `user.domain.User`/역할·상태 enum과 `user.infrastructure.UserRepository`를 추가했다.
 나머지 기능 패키지 및 `global.security`, `global.support`는 `package-info.java`만 존재한다.
-아래 트리의 주석은 각 패키지의 목표 책임이며, Clock·오류 처리·Store/User 영속성·회원가입·초기 관리자 생성·인가 서비스 외 코드는 미구현이다.
+아래 트리의 주석은 각 패키지의 목표 책임이며, Clock·오류 처리·Store/User 영속성·회원가입·초기 관리자 생성·인가 서비스·Store API 외 코드는 미구현이다.
 기능별 api/application/domain/infrastructure는 해당 기능 구현 시 필요한 만큼 추가한다.
 
 Spring Boot는 **package-by-feature**를 기본으로 하고, 너무 이른 시기에 각 기능을 복잡한 멀티모듈로 쪼개지 않는다.
@@ -212,7 +212,7 @@ DB_USERNAME은 필요할 때 지정하며 기본값은 jashop이다. 현재 DB U
 - 이력 없는 비어 있지 않은 DB는 자동 baseline하지 않는다. 기존 스키마를 검토한 후 도입한다.
 - V2는 users를 추가하며 User는 ID 기반 매장/승인자 참조와 문자열 enum을 사용한다. `@JdbcTypeCode(VARCHAR)`로 MySQL native ENUM 대신 ERD의 VARCHAR 매핑을 유지한다.
 - 회원가입은 `auth.api` DTO/Controller → `auth.application.SignupService` → `UserRepository`로 구성한다. 서비스 트랜잭션에서 BCrypt 해시와 Clock 시각을 사용하며 saveAndFlush로 동시 중복 예외를 변환한다.
-- 초기 MANAGER 생성은 auth.bootstrap, 인가 서비스는 user.application에 구현했다. Store API/Service, 승인·로그인·JWT는 미구현이다.
+- 초기 MANAGER 생성은 auth.bootstrap, 인가 서비스는 user.application에 구현했다. Store API/Service는 인가 서비스와 연결했으며 승인·로그인·JWT는 미구현이다.
 
 ### 5.2 테스트와 검증 기록
 
@@ -266,7 +266,7 @@ cd jashop-backend
 ## 6. 인증·인가 전략 [회원가입·부트스트랩·인가 서비스 구현]
 
 **현재:** `PasswordConfig`는 DelegatingPasswordEncoder + BCrypt(12)를 제공한다. 기존 Security 의존성만 사용하며 새 라이브러리는 추가하지 않았다. 비밀번호 원문과 해시는 응답·DTO 문자열 표현에 노출하지 않는다.
-`SecurityConfig`는 가입 POST 전용 STATELESS 공개 체인과 기본 인증 체인을 분리한다. CSRF 제외는 가입 체인에만 적용하며, 나머지는 기존 Boot의 기본 인증·CSRF 정책을 유지한다. 이 기본 인증은 User 로그인 구현이 아니며 초기 MANAGER 부트스트랩을 대체하지 않는다. JWT 구현 단계에서 기본 인증 체인을 교체한다.
+`SecurityConfig`는 가입 POST 전용 STATELESS 공개 체인, Store 전용 STATELESS 체인, 나머지 기본 인증 체인을 순서대로 분리한다. Store 체인은 CSRF를 유지하며 Basic/Form 인증을 제공하지 않는다. CSRF 제외는 가입 체인에만 적용하며, 나머지는 기존 Boot의 기본 인증·CSRF 정책을 유지한다. 이 기본 인증은 User 로그인 구현이 아니며 초기 MANAGER 부트스트랩을 대체하지 않는다. JWT 구현 단계에서 기본 인증 체인을 교체한다.
 
 비밀번호 길이 검증은 BCrypt의 72바이트 한계에서 조용한 잘림/런타임 오류를 방지한다. 비용 12의 운영 응답 시간과 부하는 배포 환경에서 별도로 측정한다.
 
@@ -286,7 +286,7 @@ cd jashop-backend
 - 기본 비활성인 ManagerBootstrapRunner를 `JASHOP_BOOTSTRAP_ENABLED=true`와 명시적인 비웹 모드에서만 실행한다. SecurityConfig는 Servlet 웹 환경에만 적용한다.
 - V3의 단일 행을 잠그고 완료 이력 또는 기존 MANAGER(상태 무관)가 있으면 거부한다. 기존 이메일을 승격/덮어쓰기하지 않는다. 사용자와 완료 기록은 한 트랜잭션으로 저장하며 최초 관리자에게 승인자는 없다.
 - UserAuthorizationService의 requireActive/requireManager/requireStoreAssistantManager는 DB의 현재 계정 상태와 역할·homeStoreId를 검사한다. 부매니저 전용 명령에는 MANAGER도 자동 우회하지 않는다.
-- userId는 향후 검증된 principal에서 전달해야 한다. 아직 HTTP API/JWT에 연결하지 않았으며 매장 존재·활성, 현재 근무 위치 및 업무 상태 검증은 각 후속 명령에서 추가한다. 외부 트랜잭션의 JPA 영속성 컨텍스트를 무시하는 강제 재조회나 권한 변경과 명령 사이의 동시성 잠금은 제공하지 않는다.
+- userId는 향후 검증된 principal에서 전달해야 한다. Store HTTP API에는 UserPrincipal을 통해 연결했으나 실제 principal을 발급하는 로그인/JWT는 미구현이며 매장 존재·활성, 현재 근무 위치 및 업무 상태 검증은 각 후속 명령에서 추가한다. 외부 트랜잭션의 JPA 영속성 컨텍스트를 무시하는 강제 재조회나 권한 변경과 명령 사이의 동시성 잠금은 제공하지 않는다.
 - 실행 방법과 비밀값 주입은 README의 초기 관리자 절차를 따른다.
 
 ## 7. Redis — 최근 조회 옵션 [목표 · 미구현]
@@ -375,7 +375,17 @@ sequenceDiagram
 - [ ] 일반 웹 모드의 HTTP 및 실제 인증·인가 동작 검증.
 - [ ] Redis 연결/기능 통합 테스트.
 
-Spring Security Starter는 존재하지만 JWT와 사용자 자격 검증 코드는 없다.
+Spring Security 기반의 계정 상태·역할 인가는 구현했지만 JWT 검증 및 DB 사용자의 로그인 자격 증명 검증은 미구현이다.
 전체 API를 permitAll로 열지 않고, 각 업무 API 도입 시 보안 필터와 권한 검증을 함께 구현한다.
 
 [테스트와 단계별 구현 계획](07-development-plan.md)에 따라 확장한다.
+
+
+## Store API 구현 상세 (2026-11-10)
+
+- store.api의 Controller/DTO → store.application.StoreService → StoreRepository/Store 구조다. 서비스에서 UserAuthorizationService를 호출하고 응답 DTO를 생성한다.
+- UserPrincipal은 인증된 사용자 ID만 담으며 역할/상태는 DB에서 확인한다. 요청 본문·임의 헤더로 principal을 생성하는 기능은 없다. 인증 완료 여부와 principal 타입을 검사하므로 Boot 기본 로그인 사용자도 Store 사용자로 간주하지 않는다.
+- 목록은 findByActive와 PageRequest로 필터·페이지·ID ASC를 DB에서 처리하며 응답은 명시적 StorePageResponse로 고정한다. 상세는 활성 여부와 무관하게 조회한다.
+- 이름 변경/비활성화는 동일 트랜잭션에서 findByIdForUpdate(PESSIMISTIC_WRITE)로 로드하고 dirty checking으로 저장한다. 변경 전 최신 행을 잠가 읽어 비활성 상태가 이름 변경으로 덮어써지는 것을 방지한다. 잠금은 Store 행에 대한 것으로 계정 권한 변경까지 직렬화하지는 않는다.
+- StoreSecurityErrorHandler는 Store 필터의 인증/접근 거부를 공통 ApiError(JSON, Clock, 서버 traceId)로 반환한다. 다른 경로의 기존 인증/CSRF 정책은 유지한다.
+- 아직 로그인/JWT 제공자가 없어 실제 계정으로 HTTP 호출할 수 없다. Store API 통합 테스트는 테스트 인증 객체를 주입하고 운영 필터와 실제 MySQL을 사용한다. 새 라이브러리·마이그레이션은 추가하지 않는다.

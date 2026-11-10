@@ -1,6 +1,7 @@
 package com.jashop.backend;
 
 import com.jashop.backend.user.infrastructure.UserRepository;
+import com.jashop.backend.store.infrastructure.StoreRepository;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -17,6 +18,9 @@ class JashopBackendApplicationTests {
 
 	@MockitoBean
 	JdbcTemplate jdbc;
+
+	@MockitoBean
+	StoreRepository stores;
 
 	@Test
 	void contextLoads() {

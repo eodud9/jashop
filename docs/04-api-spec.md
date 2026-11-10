@@ -51,7 +51,7 @@ MVC의 잘못된 JSON·누락/타입 오류·요청 Bean Validation은 `VALIDATI
 응답 형식 불일치는 `NOT_ACCEPTABLE`/406, 요청 Content-Type 오류는
 `UNSUPPORTED_MEDIA_TYPE`/415로 매핑한다. 기타 프레임워크 오류는 원래 HTTP 상태를 보존하면서
 4xx는 `REQUEST_FAILED`, 5xx는 `INTERNAL_SERVER_ERROR`(503은 `SERVICE_UNAVAILABLE`)로 반환한다.
-Spring Security 필터의 401/403 응답 통합은 인증 구현 단계에서 처리한다.
+Store API의 Spring Security 필터 401/403은 공통 ApiError 형식으로 구현했다. 나머지 경로의 필터 응답 통합은 인증 구현 단계에서 처리한다.
 
 - 페이지 조회는 기본 `page=0&size=20`, 최대 size=100 **[권장]**. 대량 알림/이력은 `cursor` 기반 페이지네이션을 선택할 수 있으며 실제 각 엔드포인트 계약을 구현 때 고정한다.
 - [권장] 생성·완료 명령의 네트워크 재시도는 `Idempotency-Key` 헤더 또는 요청 키 테이블/도메인 유일성으로 통제한다. **키 설계가 확정되지 않았으므로 자동으로 모두 멱등하다고 주장하지 않는다.**
@@ -67,8 +67,7 @@ Spring Security 필터의 401/403 응답 통합은 인증 구현 단계에서 �
 
 ## 2. Auth · User · Store
 
-**구현 상태(2026-11-09):** Store 및 User 영속성을 구현했다. User는 가입 대기 생성과 Repository까지 제공한다.
-공개 회원가입 API는 구현했다. Store API와 나머지 User/Auth API는 미구현이다.
+**구현 상태(2026-11-10):** Store/User 영속성, 공개 회원가입, 초기 관리자 생성, 인가 서비스 및 Store 조회·관리 API를 구현했다. 인증 사용자 계약은 연결했으나 로그인/JWT 제공자는 아직 없어 실제 계정의 HTTP 사용은 인증 단계 이후 가능하다. 나머지 User/Auth API와 현재 근무자 조회는 미구현이다.
 
 ### 2.1 엔드포인트
 
@@ -729,3 +728,46 @@ data: {"notificationId":9001,"type":"STOCK_CHECK_REQUESTED"}
 초기 MANAGER 생성은 HTTP API가 아니다. README의 환경변수 기반 비웹 절차에서 한 번만 수행하며 기존 가입자를 승격하지 않는다. V3 잠금/완료 기록과 사용자 생성을 한 트랜잭션으로 처리한다. 이후 관리자 추가·승인은 별도 정책/후속 작업이다.
 UserAuthorizationService는 ACTIVE 확인, 총괄 전용 명령, 담당 매장 부매니저 전용 명령을 각각 검증한다. null/없는 인증 ID는 UNAUTHENTICATED, 비활성 등은 ACCOUNT_* 오류, 총괄 역할 부족은 ACCESS_DENIED, 담당 매장/역할 불일치는 STORE_ACCESS_DENIED다. MANAGER는 부매니저 전용 명령을 자동 우회하지 않는다.
 이 서비스의 입력 ID는 향후 검증된 principal에서 전달해야 하며 요청 본문의 userId로 인증을 대체하지 않는다. 아직 로그인/JWT·업무 API와 연결한 상태는 아니다. 부트스트랩 거부 BOOTSTRAP_NOT_ALLOWED는 내부 실행 오류이며 새로운 공개 엔드포인트는 추가하지 않았다.
+
+
+## Store 관리 API 구현 계약 (2026-11-10)
+
+### 인증과 권한
+
+- Spring Security Authentication이 인증 완료 상태이고 principal이 UserPrincipal이어야 한다. userId는 이 principal에서만 추출하며 요청 본문/쿼리/임의 헤더로 요청자를 선택하지 않는다.
+- 서비스에서 DB의 ACTIVE 상태를 확인한다. 조회는 모든 ACTIVE 역할, 생성·수정·비활성화는 ACTIVE MANAGER만 허용한다. 부매니저의 소속 매장도 공통 마스터 변경 권한을 부여하지 않는다.
+- Store 전용 STATELESS 보안 체인은 Basic/Form 로그인을 제공하지 않으며 기존 기본 로그인 사용자·검증되지 않은 Bearer 문자열을 사용자로 변환하지 않는다. 로그인/JWT 제공자는 후속 구현이다. 테스트에서는 서버 측 테스트 인증 객체를 주입하고 실제 필터·DB·서비스를 통과한다.
+- CSRF 검사를 유지한다. 변경 요청에 CSRF 토큰이 없거나 잘못되면 ACCESS_DENIED/403이다. 그 외 인증 정보가 없거나 유효한 사용자 식별 계약이 아니면 UNAUTHENTICATED/401이며, DB의 비활성 상태는 ACCOUNT_* /403이다. 필터와 MVC 오류 모두 ApiError를 사용한다.
+
+### 목록 — GET `/api/v1/stores`
+
+| 파라미터 | 기본값 | 규칙 |
+|---|---|---|
+| page | 0 | 0 이상인 정수, 0부터 시작 |
+| size | 20 | 1~100 |
+| active | true | true는 활성, false는 비활성 매장 |
+
+정렬은 항상 id ASC다. sort 파라미터로 변경할 수 없다. JPA offset 한계 때문에 page × size가 Integer.MAX_VALUE를 초과하면 400이다. 범위를 벗어난 페이지는 content가 빈 200 응답이며 totalElements는 필터 조건의 전체 개수다. 활성·비활성 전체 동시 조회 옵션은 이번 범위에 없다.
+
+```json
+{
+  "content": [
+    {"id": 1, "code": "SHOP-A", "name": "A매장", "active": true,
+     "createdAt": "2026-11-10T01:02:03.123456Z", "updatedAt": "2026-11-10T01:02:03.123456Z"}
+  ],
+  "page": 0,
+  "size": 20,
+  "totalElements": 1,
+  "totalPages": 1
+}
+```
+
+### 상세·생성·수정·비활성화
+
+- GET `/stores/{id}`: 200 StoreResponse. 비활성 매장도 조회할 수 있다.
+- POST `/stores`: `{code,name}`. code는 공백만 아닌 최대 40자, name은 공백만 아닌 최대 120자다. 201 StoreResponse 및 Location `/api/v1/stores/{id}`. code/name의 앞뒤 공백을 자동 제거하거나 대소문자를 변경하지 않는다. 코드 중복 비교는 기존 MySQL collation을 따른다.
+- PATCH `/stores/{id}`: `{name}`만 허용, 200 StoreResponse. code·active·역할·사용자 ID 등 미허용 JSON 필드는 400이다. 비활성 매장의 이름도 변경할 수 있으며 재활성화하지 않는다.
+- PATCH `/stores/{id}/deactivate`: 요청 본문이 필요 없으며 active=false로 변경하고 200 StoreResponse를 반환한다. 행을 삭제하지 않는다. 이미 비활성이면 updatedAt을 보존한다.
+- StoreResponse는 id/code/name/active/createdAt/updatedAt의 6개 필드다. 양수가 아닌 ID·입력 오류는 VALIDATION_FAILED/400, 없는 매장은 STORE_NOT_FOUND/404, 중복 코드는 DUPLICATE_STORE_CODE/409다.
+- 생성 시 중복 사전 검사와 DB UNIQUE를 모두 사용해 동시 생성 충돌도 409로 처리한다. 기존 V1~V3 및 DB 스키마는 변경하지 않는다.
+- 이름 변경·비활성화는 서비스 트랜잭션에서 대상 Store를 PESSIMISTIC_WRITE(SELECT FOR UPDATE)로 읽고 변경한다. 같은 매장의 변경은 잠금 해제까지 기다리며 다른 매장 변경과 일반 조회는 계속 가능하다. 자동 재시도나 무기한 대기를 보장하지 않으며 잠금 대기 시간은 MySQL 설정을 따른다.

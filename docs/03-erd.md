@@ -249,6 +249,7 @@ erDiagram
 Java의 생성/수정 시각은 `Instant`, JDBC는 UTC로 해석하는 TIMESTAMP 타입,
 실제 MySQL 컬럼은 DATETIME(6)으로 매핑했다. 생성/변경 시각은 호출 측에서
 `Instant.now(clock)`으로 제공한다. 임의 매장 시드·사용자 FK는 추가하지 않았다.
+2026-11-10 Store API는 기존 스키마를 재사용한다. 생성은 uk_stores_code로 중복을 차단하고, 이름 변경/비활성화는 ID로 조회한 행에 PESSIMISTIC_WRITE 잠금을 건 서비스 트랜잭션에서 수행한다. 새 DDL이나 기존 V1~V3 변경은 없다.
 
 | 컬럼 | MySQL 타입(권장) | 제약 | 의미 |
 |---|---|---|---|
