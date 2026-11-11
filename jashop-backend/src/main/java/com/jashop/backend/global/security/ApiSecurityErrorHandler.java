@@ -54,7 +54,7 @@ public class ApiSecurityErrorHandler implements AuthenticationEntryPoint, Access
                 ? ErrorCode.UNAUTHENTICATED : ErrorCode.ACCESS_DENIED);
     }
 
-    private void write(HttpServletResponse response, ErrorCode code) throws IOException {
+    void write(HttpServletResponse response, ErrorCode code) throws IOException {
         String traceId = MDC.get("traceId");
         if (traceId == null || traceId.isBlank()) {
             traceId = UUID.randomUUID().toString();

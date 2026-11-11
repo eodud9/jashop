@@ -2,6 +2,7 @@ package com.jashop.backend.auth.token;
 
 import java.time.Clock;
 import java.time.Instant;
+import java.util.UUID;
 
 import org.springframework.security.oauth2.core.OAuth2Error;
 import org.springframework.security.oauth2.core.OAuth2TokenValidator;
@@ -24,7 +25,9 @@ public class AccessJwtValidator implements OAuth2TokenValidator<Jwt> {
         try {
             String subject = jwt.getSubject();
             long userId = Long.parseLong(subject);
+            String sid = jwt.getClaimAsString("sid");
             if (userId <= 0 || !Long.toString(userId).equals(subject)
+                    || sid == null || !UUID.fromString(sid).toString().equals(sid)
                     || !settings.issuer().equals(jwt.getClaimAsString("iss"))
                     || jwt.getAudience() == null || !jwt.getAudience().contains(settings.audience())
                     || !"access".equals(jwt.getClaimAsString("token_use"))

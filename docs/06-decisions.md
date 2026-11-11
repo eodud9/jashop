@@ -153,7 +153,7 @@
 | O-17 | 알림 | 미수락 확인 요청의 임계시간/긴급 알림 정책? | 설정값으로 노출, 실제 매장 실험 후 결정 |
 | O-18 | 알림 | 전달 재시도 횟수·대기·보존기간? | 10초/30초/120초, 총 4회 예시만 설정 |
 | O-19 | 알림 | 기기에서 계정 전환/로그아웃 시 endpoint 소유권 정리? | 다른 사용자로 자동 이전 금지 |
-| O-20 | 인증 | Access/Refresh 토큰 정확한 TTL, 로그인 실패 제한? | 예시값 문서와 최종 보안 정책을 구분 |
+| O-20 | 인증 | 로그인 실패 제한 기준? | TTL은 2026-11-11 Access 15분/Refresh 7일 확정(D-20261111-02), 실패 제한은 미결 |
 | O-21 | API | 목록 페이지(page) 또는 커서(cursor) 일관된 선택? | 상품은 페이지, 이벤트/알림은 커서 우선 검토 |
 | O-22 | API | ID를 JSON 숫자로 보낼지 문자열로 보낼지? | JS 안전 정수 문제를 고려해 프론트와 동시 결정 |
 | O-23 | 운영 | 매장/직원/알림/확인 이력의 보존·삭제 정책? | MVP에서는 soft deactivate와 이력 보존 우선 |
@@ -284,3 +284,16 @@
 - HTTP: 공개 가입/로그인 POST와 나머지 Bearer 보호 체인 2개를 사용하며 Basic/Form 및 기본 logout 필터를 제거했다. 쿠키/query/기존 HttpSession으로 인증하지 않고 로그인/내 정보 응답은 no-store다. 현재 Bearer 업무 경로의 CSRF 요구를 제거하고 미래 쿠키 경로까지 전역 해제하지 않는다. CORS는 설정 origin만 허용하고 credentials=false다. CSRF 공식 근거: https://docs.spring.io/spring-security/reference/servlet/exploits/csrf.html
 - 한계: Refresh/AuthSession/로그아웃·Access 세션별 폐기·로그인 실패 제한·키 순환 관리·프론트 화면은 이번 범위에 없다. 토큰 만료 시 재로그인하며 진행 중인 업무와 권한 변경까지 직렬화하는 것은 아니다. 새 DDL 없이 V1~V4 및 기존 Compose DB/볼륨을 보존한다.
 - 검증: `./gradlew test --offline` 전체 237건 통과(기존 190 + 로그인/JWT MySQL 통합 40 + 설정 7, 실패/오류/스킵 0). 실제 토큰으로 기존 업무 흐름과 계정/권한 변경 반영을 검증했다. 이전 CSRF 기대값 2건과 잘못된 토큰의 발급기 사전 검증 오류 1건은 테스트 수정 후 해결했다.
+
+
+### D-20261111-02: Refresh 회전·현재 계열 로그아웃과 즉시 Access 차단
+
+- 상태: 채택. 사용자 명시 확정은 Access 15분/Refresh 7일/Access 즉시 차단이며, 기존 제안의 7일 절대 만료·회전·현재 계열 재사용 폐기 흐름으로 구현한다.
+- 선택: V5 auth_sessions에 토큰별 해시/계열/만료/폐기/다음 토큰 참조를 저장하고 추가 family_revoked_at으로 정상 회전과 계열 폐기를 구분한다. 계열의 최소 ID 행을 불변 루트로 보존한다. 32바이트 SecureRandom 토큰은 HttpOnly 쿠키에만 보내고 SHA-256만 저장한다.
+- 동시성: 루트 ID 스칼라 조회 후 루트 PK → 현재 토큰 → 사용자 순서로 잠그고 최신 상태를 읽는다. 모든 회전·폐기는 같은 루트 잠금을 사용한다. 재사용/만료/비활성 폐기를 정상 커밋한 뒤 Controller에서 오류를 내어 폐기가 롤백되지 않게 한다. 기존 V1~V4는 바꾸지 않는다.
+- Access: sid 필수 및 매 요청 루트의 사용자/절대 만료/계열 폐기를 DB 확인한다. 로그아웃 커밋 후 다음 요청부터 즉시 차단하며 진행 중인 요청을 취소하지 않는다. 이전 sid 없는 토큰은 재로그인을 요구한다. 고정 900초 정책에 어긋나는 TTL 설정은 기동 시 거부한다.
+- HTTP: 로그인도 Refresh 쿠키를 발급하므로 로그인/refresh/logout에 CSRF+Origin 검사를 적용한다. CSRF GET은 익명으로 cookie와 XOR token을 제공한다. Refresh 쿠키는 __Secure-jashop_refresh, Secure/HttpOnly/Strict, Path=/api/v1/auth, 남은 절대 TTL이다. CORS는 credentials=true/명시 origin/CSRF 헤더이며 Bearer와 cookie 체인을 분리한다.
+- 폐기 범위: 현재 계열만 폐기하며 다른 로그인은 유지한다. 회전된 이전 Refresh로도 logout할 수 있다. logout의 누락/알 수 없는 쿠키는 다른 계열을 변경하지 않고 204로 쿠키만 제거한다. CSRF/Origin 실패는 쿠키/계열을 폐기하지 않는다.
+- 한계: 엄격한 재사용 정책 때문에 중복/병렬 요청의 승자 토큰도 후속 재사용 감지로 폐기된다. 클라이언트의 중복 조정과 응답 유실 시 재로그인이 필요할 수 있다. SameSite Strict는 같은 사이트 HTTPS 배포를 요구하며 테스트는 서버/MySQL 범위다. root/이력 정리, 전체 기기 logout, 로그인 실패 제한·키 순환은 미구현이다.
+- 근거: https://www.rfc-editor.org/rfc/rfc9700.html#section-4.14 및 https://docs.spring.io/spring-security/reference/servlet/exploits/csrf.html
+- 검증: `./gradlew test --offline` 전체 267건 통과(기존 237 + 세션 통합 29 + 고정 TTL 검증 1, 실패/오류/스킵 0). 실제 MySQL의 non-root 동시 회전·logout 경쟁·PK 잠금·실패 롤백·스키마 제약·V4→V5 보존과 운영 CSRF/Origin/Bearer 필터를 검증했다. 테스트 상수/인코딩/Mock Cookie SameSite 표현 차이는 수정 후 해결했다.

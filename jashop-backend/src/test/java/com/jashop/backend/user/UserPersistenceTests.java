@@ -172,7 +172,7 @@ class UserPersistenceTests {
         }
         Flyway upgraded = Flyway.configure().dataSource(url, "root", mysql.getPassword())
                 .locations("classpath:db/migration").baselineOnMigrate(false).cleanDisabled(true).load();
-        assertThat(upgraded.migrate().migrationsExecuted).isEqualTo(3);
+        assertThat(upgraded.migrate().migrationsExecuted).isEqualTo(4);
         try (var connection = DriverManager.getConnection(url, "root", mysql.getPassword());
                 var statement = connection.createStatement()) {
             statement.executeUpdate("INSERT INTO users(email,password_hash,name,role,status,created_at,updated_at) "
@@ -189,7 +189,7 @@ class UserPersistenceTests {
                 assertThat(rows.getString(1)).isEqualTo("PENDING");
             }
         }
-        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("4");
+        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("5");
     }
 
     private User saveUser(String email) {

@@ -33,7 +33,7 @@ class JwtConfigTests {
     }
 
     @ParameterizedTest
-    @ValueSource(longs = {0, -1, 86401})
+    @ValueSource(longs = {0, -1, 60, 86401})
     void invalidTtlIsRejected(long ttl) {
         assertThatThrownBy(() -> new JwtSettings("https://jashop.local", "jashop-api", ttl))
                 .isInstanceOf(IllegalStateException.class);
@@ -44,11 +44,11 @@ class JwtConfigTests {
         byte[] key = new byte[32];
         new java.security.SecureRandom().nextBytes(key);
         context.withPropertyValues("jashop.jwt.secret-base64=" + Base64.getEncoder().encodeToString(key),
-                "jashop.jwt.issuer=https://issuer.example", "jashop.jwt.audience=test-api", "jashop.jwt.access-ttl-seconds=60")
+                "jashop.jwt.issuer=https://issuer.example", "jashop.jwt.audience=test-api", "jashop.jwt.access-ttl-seconds=900")
                 .run(application -> {
                     assertThat(application).hasNotFailed();
                     assertThat(application.getBean(JwtSettings.class))
-                            .isEqualTo(new JwtSettings("https://issuer.example", "test-api", 60));
+                            .isEqualTo(new JwtSettings("https://issuer.example", "test-api", 900));
                     assertThat(application).hasSingleBean(org.springframework.security.oauth2.jwt.JwtDecoder.class);
                 });
     }

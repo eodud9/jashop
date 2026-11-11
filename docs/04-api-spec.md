@@ -67,7 +67,7 @@ Store 및 관리자 가입 심사 API의 Spring Security 필터 401/403은 공�
 
 ## 2. Auth · User · Store
 
-**구현 상태(2026-11-10):** Store/User 영속성, 공개 회원가입, 초기 관리자 생성, 인가 서비스 및 Store 조회·관리 API를 구현했다. 인증 사용자 계약은 실제 Access JWT 검증으로 연결했다. 승인 대기 목록·승인·거절 API도 구현했다. 로그인·Access JWT·내 정보 조회를 구현했다(2026-11-11). Refresh/로그아웃, 나머지 User 관리 API와 현재 근무자 조회는 미구현이다.
+**구현 상태(2026-11-10):** Store/User 영속성, 공개 회원가입, 초기 관리자 생성, 인가 서비스 및 Store 조회·관리 API를 구현했다. 인증 사용자 계약은 실제 Access JWT 검증으로 연결했다. 승인 대기 목록·승인·거절 API도 구현했다. 로그인·Access JWT·내 정보 조회를 구현했다(2026-11-11). Refresh/로그아웃 및 즉시 Access 차단도 3-2로 구현했다. 나머지 User 관리 API와 현재 근무자 조회는 미구현이다.
 
 ### 2.1 엔드포인트
 
@@ -124,7 +124,7 @@ Store 및 관리자 가입 심사 API의 Spring Security 필터 401/403은 공�
 - 사전 이메일 중복 검사와 DB `uk_users_email` UNIQUE 위반을 모두 409 `DUPLICATE_EMAIL`로 처리한다. 다른 DB 제약 오류를 이메일 중복으로 바꾸지 않는다.
 - 성공은 201과 위 6개 필드의 DTO만 반환한다. 비밀번호·해시·토큰을 반환하지 않고 로그인 세션도 만들지 않는다. 조회용 사용자 API가 아직 없으므로 Location 헤더는 생략한다.
 - 해시는 Spring Security DelegatingPasswordEncoder + BCrypt 비용 12를 사용해 `{bcrypt}` 접두사와 함께 저장한다. Salt는 매번 자동 생성된다.
-- 공개 보안 체인은 해당 POST 경로에만 매칭되고 STATELESS이며 해당 체인에서만 CSRF 검사를 제외한다. 다른 경로의 기존 기본 인증·CSRF 정책은 유지한다. 계정 승인·거절은 별도 관리자 API로 구현했다. 로그인·Access JWT는 3-1에서 구현했으며 Refresh·로그아웃은 아직 없다.
+- 공개 보안 체인은 해당 POST 경로에만 매칭되고 STATELESS이며 해당 체인에서만 CSRF 검사를 제외한다. 계정 승인·거절은 별도 관리자 API로 구현했다. 로그인·Access JWT는 3-1, Refresh·로그아웃은 3-2로 구현했다. 현재 로그인/쿠키 POST의 CSRF·Origin 및 Bearer 인증 계약은 마지막 3-2 절을 따른다.
 
 ### 2.3 승인 — POST `/admin/users/{id}/approve`
 
@@ -156,7 +156,7 @@ POST /api/v1/auth/login
 }
 ```
 
-Refresh Token은 **HTTP-only 쿠키**에만 제공하는 [권장] 설계이며 실제 Access/Refresh TTL(예시 900초)은 확정하지 않았다. `AuthSession`에서 Refresh 해시·계열·만료·폐기를 관리하고 회전 경쟁을 테스트한다. PENDING/REJECTED/INACTIVE 상태는 업무 토큰을 발급하지 않는다.
+Refresh Token은 HttpOnly/Secure 쿠키에만 제공한다. 2026-11-11 사용자 확정으로 Access 900초, Refresh 최초 로그인부터 604800초, 로그아웃 후 Access 즉시 차단을 적용했다. `AuthSession`에서 Refresh 해시·계열·만료·폐기를 관리하고 회전 경쟁을 테스트한다. PENDING/REJECTED/INACTIVE 상태는 업무 토큰을 발급하지 않는다.
 
 ---
 
@@ -838,3 +838,41 @@ PENDING만 조회한다. page=0, size=20 기본값, size=1~100, id ASC 고정 �
 ### 설정·제외 범위
 
 웹 기동 시 JASHOP_JWT_SECRET_BASE64는 필수다. issuer 기본 https://jashop.local, audience jashop-api, Access TTL 기본 900초(설정 1~86400초)이며 이는 구현 기본값으로 운영 TTL 정책은 별도 검토한다. 비웹 관리자 부트스트랩은 JWT 설정 없이 실행한다. Refresh/AuthSession/로그아웃·자동 연장·로그인 실패 제한은 이번 범위에서 추가하지 않는다. 새 DB 스키마나 V5는 필요하지 않다.
+
+
+## Refresh·로그아웃 확정 구현 계약 (2026-11-11, Phase 3-2)
+
+이 절은 이전 3-1의 Access-only 로그인/CSRF·CORS·TTL 설정 설명을 대체한다. 로그인 응답 JSON 필드는 동일하며 Refresh 원문은 추가하지 않는다.
+
+### 확정 정책과 상태
+
+- Access 900초 고정. JASHOP_JWT_ACCESS_TTL_SECONDS는 900만 허용한다.
+- Refresh는 최초 로그인부터 604800초(7일) 절대 만료. 회전 시 동일 expiresAt을 승계한다.
+- 로그인마다 별도 familyId. 정상 회전은 기존 Access를 폐기하지 않지만 계열 만료·로그아웃·재사용 폐기는 해당 계열의 모든 Access를 다음 요청부터 거부한다.
+- Access에 sid(UUID 계열 ID)를 필수로 추가하고 MAC/claim 검증 후 DB 활성 계열 여부를 확인한다. 없는/다른 사용자/폐기/만료 계열은 UNAUTHENTICATED/401이다. 기존 sid 없는 Access는 재로그인한다.
+- 재사용은 엄격하게 해당 계열 전체를 폐기하며 다른 계열은 유지한다. 같은 Refresh의 동시 요청/응답 유실 재시도도 재사용에 해당할 수 있다. 진행 중인 이미 인증된 요청까지 취소하지는 않는다.
+
+### CSRF·Origin·쿠키
+
+- GET `/auth/csrf`: 공개, no-store, JSON `{token,headerName}` 및 Secure/HttpOnly/SameSite=Strict/Path=/api/v1/auth의 XSRF-TOKEN 쿠키. token은 XOR 마스킹 값이고 headerName은 X-XSRF-TOKEN이다. 서버 HTTP 세션을 생성하지 않는다.
+- POST `/auth/login`, `/auth/refresh`, `/auth/logout` 모두 명시적으로 허용된 Origin과 유효한 CSRF 쿠키/헤더 쌍을 요구한다. 누락·잘못된 값은 403이다. 보호 검사가 실패하면 로그인 계열을 생성·폐기하지 않는다.
+- 쿠키 인증 체인은 Bearer를 검사하지 않으므로 만료/잘못된 Access 헤더가 재발급·로그아웃을 가로막지 않는다. Refresh 원문은 전용 쿠키에서만 받으며 JSON/query/Authorization은 대체 인증 수단이 아니다.
+- Refresh 쿠키: `__Secure-jashop_refresh`, Secure, HttpOnly, SameSite=Strict, Path=/api/v1/auth, 최초 만료까지 남은 초를 Max-Age로 사용한다. 삭제는 같은 속성·Path에 Max-Age=0으로 수행한다.
+- CORS는 명시적 origin(와일드카드 금지), credentials=true, Authorization/Content-Type/X-XSRF-TOKEN, GET/POST/PATCH/OPTIONS를 허용한다. HTTPS·같은 사이트 배포가 필요하며 브라우저는 fetch credentials 포함으로 사용한다.
+
+### POST `/auth/login`
+
+기존 입력/비밀번호/계정 상태 검증 후 V5 AuthSession 루트를 생성한다. Access JSON 및 Refresh 쿠키를 커밋 후 전달한다. Root는 무작위 familyId, SHA-256 tokenHash, 7일 만료를 가지며 토큰 원문·해시를 JSON/로그에 노출하지 않는다.
+
+### POST `/auth/refresh`
+
+- body 없음. 성공은 200과 기존 LoginResponse JSON(새 Access/현재 사용자), 새 Refresh 쿠키, no-store다. Access가 만료돼도 호출할 수 있다.
+- 32바이트 무작위 Refresh를 해시로 조회해 루트 ID만 읽고, 루트 PK 행 → 현재 토큰 행 → 사용자 행 순서로 PESSIMISTIC_WRITE 잠금을 얻는다. 일반 조회의 과거 스냅샷/영속성 컨텍스트가 잠금 후 최신 상태 검사를 대체하지 않도록 토큰도 locking read한다.
+- 정상 상태는 새 세션을 같은 계열/같은 expiresAt으로 추가하고 이전 revokedAt/replacedById를 기록한다. 새 토큰·쿠키는 트랜잭션 커밋 후 응답한다.
+- 없는/잘못된/이미 폐기한 계열: REFRESH_TOKEN_INVALID/401. 절대 만료: REFRESH_TOKEN_EXPIRED/401. 회전된 이전 토큰 재사용: REFRESH_TOKEN_REUSED/401. 사용자 비활성 등: ACCOUNT_*/403.
+- 만료/재사용/비활성 감지 시 계열 폐기를 저장하고 정상적으로 커밋한 뒤 Controller가 오류를 반환한다. 실패 예외로 폐기 기록이 롤백되지 않는다. 이러한 인증 실패 응답은 Refresh 쿠키를 제거한다.
+
+### POST `/auth/logout`
+
+body·유효 Access 필요 없음. 알려진 Refresh(회전된 이전 토큰 포함)의 계열을 잠그고 계열 폐기와 토큰 폐기를 커밋한 뒤 204/no-store/Refresh 쿠키 삭제를 반환한다. 누락/알 수 없는 쿠키는 특정 계열을 식별할 수 없으므로 다른 계열을 변경하지 않고 204로 쿠키만 제거한다. 반복 호출은 최초 폐기 시각을 유지한다.
+Refresh와 로그아웃이 경쟁해도 루트 PK 잠금 때문에 로그아웃 완료 뒤 해당 계열을 되살리지 않는다. DB 실패 시 성공 204로 위장하거나 쿠키를 먼저 제거하지 않는다. 브라우저 응답 순서 때문에 폐기된 쿠키가 나중에 저장될 수 있으나 서버는 이를 거부한다.

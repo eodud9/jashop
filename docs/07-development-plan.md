@@ -2,7 +2,7 @@
 
 **설계 기준일:** 2026-11-05 · **구현 확인:** 2026-11-11.
 공통 기반과 Phase 2-0/2-1(Store 영속성), Phase 2-2A(User 영속성) 및 Phase 2-2B(회원가입 API) 구현. 상세 검증 기록은 각 절을 따른다.
-초기 MANAGER 생성과 계정 상태/역할/담당 매장 인가 서비스를 추가했다(2-2C). Store 조회/관리 API와 인가 principal 계약 연결을 추가했다(2-3). 관리자 가입 심사 API를 추가했다(2-4). 로그인·Access JWT·내 정보 조회를 구현했다(3-1). Refresh/AuthSession 및 나머지 업무·배포는 미구현이다. 인프라별 검증 범위는 아래 기록을 따른다.
+초기 MANAGER 생성과 계정 상태/역할/담당 매장 인가 서비스를 추가했다(2-2C). Store 조회/관리 API와 인가 principal 계약 연결을 추가했다(2-3). 관리자 가입 심사 API를 추가했다(2-4). 로그인·Access JWT·내 정보 조회를 구현했다(3-1). Refresh/AuthSession·로그아웃과 Access 즉시 차단을 구현했다(3-2). 나머지 업무·배포는 미구현이다. 인프라별 검증 범위는 아래 기록을 따른다.
 로컬 DB 점검은 2026-11-07 기록이며 최신 테스트 결과는 각 단계의 실행 기록을 따른다. 현재 로컬 Compose DB에 후속 마이그레이션이 적용됐음을 의미하지 않는다.
 
 ## 1. 개발 원칙
@@ -119,22 +119,24 @@ Store Controller/Service/API와 User 도메인은 이번 범위에서 추가하�
 
 ### 단계 2-2 이후 및 단계 3 — User/Store API/Auth
 
-User 영속성(2-2A)과 회원가입(2-2B)을 구현했다. 초기 MANAGER/인가 기반(2-2C)을 구현했다. Store API/인가 계약 연결(2-3)을 구현했다. 관리자 가입 심사(2-4)를 구현했다. 로그인·Access JWT(3-1)를 구현했다. 다음 인증 작업은 Refresh/AuthSession·로그아웃이다. 이후 체크리스트는 별도 완료 표시가 없으면 미구현이다.
+User 영속성(2-2A)과 회원가입(2-2B)을 구현했다. 초기 MANAGER/인가 기반(2-2C)을 구현했다. Store API/인가 계약 연결(2-3)을 구현했다. 관리자 가입 심사(2-4)를 구현했다. 로그인·Access JWT(3-1)를 구현했다. Refresh/AuthSession·로그아웃(3-2)을 구현했다. 이후 체크리스트는 별도 완료 표시가 없으면 미구현이다.
 
 | 작업 | 구현 범위 | 완료 기준 |
 |---|---|---|
 | 2-2A User 영속성 (구현) | 새 V2 SQL, User/역할/상태, Repository. 기존 V1은 유지 | MySQL 저장·조회, 이메일 UNIQUE, Store/승인자 FK, enum/소속 CHECK, JPA validate |
 | 2-2B 회원가입 (구현) | DTO, 비밀번호 해시, 가입 Service/Controller | STAFF/PENDING·소속 없음, 201/중복 409, 입력 검증·권한 상승 방지 |
 
-이메일 정규화는 `strip()` + `Locale.ROOT` 소문자화로 구현했다. Repository 조회 전에도 `User.normalizeEmail()`을 사용한다. 회원가입에서 이메일 형식, 비밀번호 8~72자/UTF-8 최대 72바이트를 검증하고 미허용 필드는 400으로 거부한다. 해시는 BCrypt 비용 12를 사용한다. 초기 MANAGER/인가 기반은 2-2C로 구현했다. Store API는 2-3으로 구현했다. 승인·거절은 2-4로 구현했다. 로그인·Access JWT는 3-1로 구현했다. Refresh/AuthSession은 후속 단계다.
+이메일 정규화는 `strip()` + `Locale.ROOT` 소문자화로 구현했다. Repository 조회 전에도 `User.normalizeEmail()`을 사용한다. 회원가입에서 이메일 형식, 비밀번호 8~72자/UTF-8 최대 72바이트를 검증하고 미허용 필드는 400으로 거부한다. 해시는 BCrypt 비용 12를 사용한다. 초기 MANAGER/인가 기반은 2-2C로 구현했다. Store API는 2-3으로 구현했다. 승인·거절은 2-4로 구현했다. 로그인·Access JWT는 3-1로 구현했다. Refresh/AuthSession은 3-2로 구현했다.
 
 - [x] 가입 시 PENDING + STAFF 초기화; 역할/소속은 클라이언트 지정 불가.
 - [x] 총괄 MANAGER 일회성 비웹 부트스트랩 및 DB 동시 실행 보호.
 - [x] 직원·부매니저 승인 시 ACTIVE homeStore 지정, 승인 대기 목록 및 거절/사유 저장.
 - [x] ACTIVE 계정/총괄 권한/담당 매장 부매니저 인가 서비스. Store API principal 계약은 연결했으며 실제 principal 발급은 3-1의 Access JWT와 연결했다.
 - [x] 로그인 및 JWT Access 발급·검증, 기존 UserPrincipal/DB 인가 연결.
-- [ ] Refresh 해시/회전/폐기, 로그아웃/비활성화 API.
-- [ ] HTTP-only Refresh Cookie, Origin/CSRF 방어, 실패 로그인 제한 검토.
+- [x] Refresh 해시/회전/폐기, 현재 계열 로그아웃 및 Access 즉시 차단.
+- [ ] 사용자 비활성화 API.
+- [x] HttpOnly/Secure Refresh 쿠키 및 Origin/CSRF 방어.
+- [ ] 로그인 실패 제한 정책 및 구현.
 - [x] 계정 비활성화 후 이전 JWT로 업무 API 접근 거부 확인.
 
 
@@ -198,6 +200,19 @@ V1/V2는 변경하지 않았으며 기존 Compose DB/볼륨에 V3을 적용하�
 검증: `./gradlew test --offline` 전체 **237건 통과**(실패/오류/스킵 0). 기존 190건 + 실제 MySQL/운영 JWT 필터 로그인 통합 40건 + 설정 검증 7건이다. 실제 로그인 토큰으로 내 정보·Store 생성·가입 승인/거절과 승인 계정 로그인을 검증했다. 비밀번호/계정 상태, 서명/필수 claim/만료 경계/잘못된 시간/위조 역할, 쿠키·query·Basic·기존 세션 거부, 상태/권한 변경 반영, CORS, 비밀값 비노출, 외부 키 누락/형식/길이·TTL 검증을 확인했다. 테스트 키는 프로세스별 무작위 생성이다.
 첫 실행의 기존 CSRF 기대값 실패 2건은 Bearer 전용 업무 경로 계약에 맞춰 변경했다. 신규 테스트 중 exp가 iat보다 빠른 토큰을 Spring 발급기로 생성하려다 라이브러리 사전 검증에 막힌 1건은 테스트 토큰을 하위 JOSE API로 생성해 검증하도록 수정했다. 이후 전체 재실행에 성공했다. 첫 의존성 다운로드는 온라인 테스트 실행으로 수행했고 최종 검증은 offline으로 통과했다.
 Refresh/AuthSession/로그아웃·로그인 실패 제한·프론트 UI는 추가하지 않았다. 웹 기동 시 외부 JWT 키가 필요하며 비웹 부트스트랩은 키 없이 실행한다. 기존 Compose DB/볼륨·실사용자 및 적용된 마이그레이션은 변경하지 않았다.
+
+### 단계 3-2 — Refresh·로그아웃·Access 즉시 차단 (완료: 2026-11-11)
+
+- [x] 사용자 확정 Access 900초/Refresh 604800초, 최초 로그인 만료일 승계와 현재 계열 폐기.
+- [x] V5 AuthSession, Refresh 원문 비저장(SHA-256), 루트 PK 잠금 기반 회전/재사용/로그아웃.
+- [x] 재사용/만료/비활성 폐기를 커밋한 후 오류 응답, DB 실패 시 원자 롤백.
+- [x] Access sid와 매 요청 DB 계열 검증으로 로그아웃 커밋 후 다음 요청 즉시 거부. 타 계열 유지.
+- [x] Secure/HttpOnly/Strict Refresh·CSRF 쿠키, CSRF 토큰 GET, 인증 POST Origin/CSRF, 명시적 CORS credentials.
+- [x] 기존 V1~V4 보존 및 정책/API/ERD/운영 전환 문서 갱신.
+
+검증: `./gradlew test --offline` 전체 **267건 통과**(실패/오류/스킵 0). 기존 237건 + RefreshSessionApiTests 실제 MySQL/운영 필터 통합 29건 + 확정 TTL 설정 검증 1건이다. 로그인 쿠키/해시·UTC·DB FK/UNIQUE/CHECK, 실제 Cookie CSRF/XOR·Origin, 만료 Access로 재발급, 회전 후 기존 Access 유지, 7일 절대 만료, 재사용 폐기 커밋·타 계열 유지, logout 즉시 차단·반복 호출, 비활성 재발급 폐기, non-root Refresh 동시 경쟁 및 logout 경쟁, PK 잠금 대기, 트리거 기반 회전/폐기 롤백, V4→V5 데이터 보존·재실행을 검증했다.
+진행 중 CORS 테스트 상수와 HTTP 헤더 이름 충돌, 테스트 헬퍼의 인코딩 checked exception을 수정했다. CSRF 쿠키 SameSite 검증은 MockHttpServletResponse가 일반 Servlet Cookie의 확장 속성을 문자열에 생략하므로 실제 Cookie.getAttribute를 검사하도록 보완했다. 최종 전체 재실행에 성공했다.
+기존 Compose DB/볼륨·실사용자는 변경하지 않았다. 새 sid 없는 기존 토큰은 재로그인이 필요하며 실브라우저 HTTPS E2E는 수행하지 않았다. 로그인 실패 제한·전체 기기 logout·세션 정리·키 순환·진행 중 요청 취소는 범위 밖이다.
 
 ### 단계 4~5 — 근무
 

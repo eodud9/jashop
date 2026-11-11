@@ -1,9 +1,8 @@
 package com.jashop.backend.auth.application;
 
-import com.jashop.backend.auth.api.dto.AuthenticatedUserResponse;
 import com.jashop.backend.auth.api.dto.LoginRequest;
-import com.jashop.backend.auth.api.dto.LoginResponse;
-import com.jashop.backend.auth.token.AccessTokenService;
+import com.jashop.backend.auth.session.application.AuthSessionService;
+import com.jashop.backend.auth.session.application.SessionTokens;
 import com.jashop.backend.global.error.BusinessException;
 import com.jashop.backend.global.error.ErrorCode;
 import com.jashop.backend.user.application.UserAuthorizationService;
@@ -20,23 +19,23 @@ public class LoginService {
     private final UserRepository users;
     private final UserAuthorizationService authorization;
     private final PasswordEncoder encoder;
-    private final AccessTokenService tokens;
+    private final AuthSessionService sessions;
     private final Validator validator;
     private final String dummyHash;
 
     public LoginService(UserRepository users, UserAuthorizationService authorization, PasswordEncoder encoder,
-            AccessTokenService tokens, Validator validator) {
+            AuthSessionService sessions, Validator validator) {
         this.users = users;
         this.authorization = authorization;
         this.encoder = encoder;
-        this.tokens = tokens;
+        this.sessions = sessions;
         this.validator = validator;
         // 없는 이메일도 BCrypt 검증을 수행한다. 이 값은 로그인 가능한 사용자 비밀번호가 아니다.
         this.dummyHash = encoder.encode("dummy-login-comparison");
     }
 
-    @Transactional(readOnly = true)
-    public LoginResponse login(LoginRequest request) {
+    @Transactional
+    public SessionTokens login(LoginRequest request) {
         if (request == null || !validator.validate(request).isEmpty()) {
             throw new BusinessException(ErrorCode.VALIDATION_FAILED);
         }
@@ -51,6 +50,6 @@ public class LoginService {
             throw new BusinessException(ErrorCode.INVALID_CREDENTIALS);
         }
         user = authorization.requireActive(user.getId());
-        return new LoginResponse(tokens.issue(user.getId()), "Bearer", tokens.expiresIn(), AuthenticatedUserResponse.from(user));
+        return sessions.open(user.getId());
     }
 }

@@ -410,7 +410,7 @@ class UserReviewApiTests extends com.jashop.backend.support.JwtTestSupport {
         }
         var upgraded = Flyway.configure().dataSource(url, "root", mysql.getPassword())
                 .locations("classpath:db/migration").cleanDisabled(true).load();
-        assertThat(upgraded.migrate().migrationsExecuted).isEqualTo(1);
+        assertThat(upgraded.migrate().migrationsExecuted).isEqualTo(2);
         assertThat(upgraded.migrate().migrationsExecuted).isZero();
         upgraded.validate();
         try (var connection = DriverManager.getConnection(url, "root", mysql.getPassword());

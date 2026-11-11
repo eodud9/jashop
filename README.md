@@ -133,7 +133,7 @@ npm run dev
 회원가입 API로 총괄 권한을 취득할 수 없다. 최초 운영자만 별도의 비웹 부트스트랩으로 생성한다.
 기존 MANAGER가 있거나 생성 완료 기록이 있으면 재실행을 거부하며 기존 계정의 승격·비밀번호 재설정은 하지 않는다.
 
-1. 대상 DB와 DB_USERNAME/DB_PASSWORD를 확인한다. 이 명령은 대상 DB에 미적용 Flyway 마이그레이션(V4 포함)을 적용한다.
+1. 대상 DB와 DB_USERNAME/DB_PASSWORD를 확인한다. 이 명령은 대상 DB에 미적용 Flyway 마이그레이션(V5 포함)을 적용한다.
 2. `JASHOP_BOOTSTRAP_NAME`, `JASHOP_BOOTSTRAP_EMAIL`, `JASHOP_BOOTSTRAP_PASSWORD`를 실행 환경에 주입한다. 비밀번호는 회원가입과 동일하게 8~72자/UTF-8 최대 72바이트다. 비밀 관리 도구나 터미널의 숨김 입력을 사용하고 명령행 인자·소스·공유 로그에 비밀번호를 기록하지 않는다.
 3. 백엔드 디렉터리에서 다음을 실행한다. 부트스트랩은 기본 비활성이며 비웹 모드를 명시해야 한다.
 
@@ -162,12 +162,30 @@ export JASHOP_JWT_SECRET_BASE64="$(openssl rand -base64 32)"
 | JASHOP_JWT_SECRET_BASE64 | 필수, 무작위 32바이트 이상을 Base64 인코딩 |
 | JASHOP_JWT_ISSUER | https://jashop.local (토큰 발급자 식별값, 외부 서버 조회 없음) |
 | JASHOP_JWT_AUDIENCE | jashop-api |
-| JASHOP_JWT_ACCESS_TTL_SECONDS | 900, 설정 범위 1~86400초 |
+| JASHOP_JWT_ACCESS_TTL_SECONDS | 900 고정(15분 확정 정책), 다른 값은 기동 거부 |
 | JASHOP_SECURITY_ALLOWED_ORIGINS | http://localhost:5173, 여러 origin은 쉼표로 구분 |
 
-`POST /api/v1/auth/login`에 `{email,password}` JSON을 보내면 `{accessToken,tokenType,expiresIn,user}`를 반환합니다. ACTIVE 계정만 로그인할 수 있으며 로그인 성공 응답은 no-store, 인증 쿠키·서버 세션을 발급하지 않습니다. 토큰을 얻은 후 `Authorization: Bearer {accessToken}` 헤더로 `GET /api/v1/users/me`, Store·가입 심사 API를 호출합니다. 비밀번호·토큰을 명령행 인자나 공유 파일에 남기지 않습니다.
+`POST /api/v1/auth/login`에 `{email,password}` JSON을 보내면 `{accessToken,tokenType,expiresIn,user}`를 반환합니다. ACTIVE 계정만 로그인할 수 있으며 로그인 성공 응답은 no-store입니다. Access는 JSON으로, Refresh는 Secure/HttpOnly 쿠키로 발급하며 HTTP 세션은 만들지 않습니다. 로그인 전에 아래 CSRF 절차가 필요합니다. 토큰을 얻은 후 `Authorization: Bearer {accessToken}` 헤더로 `GET /api/v1/users/me`, Store·가입 심사 API를 호출합니다. 비밀번호·토큰을 명령행 인자나 공유 파일에 남기지 않습니다.
 
-현재 구현된 Bearer 업무 API는 CSRF 토큰을 요구하지 않으며 쿠키·Basic·기존 세션으로 인증하지 않습니다. Refresh·로그아웃은 아직 없고 Access가 만료되면 다시 로그인합니다. 로그인 실패 횟수 제한·키 순환/폐기 관리·프론트엔드 로그인 화면은 이번 범위에 없습니다. 토큰은 개인 정보 암호화 수단이 아니므로 사용자 ID와 검증용 claim만 담습니다.
+현재 구현된 Bearer 업무 API는 CSRF 토큰을 요구하지 않으며 쿠키·Basic·기존 세션으로 인증하지 않습니다. Access 만료 시 Refresh 쿠키로 재발급합니다. 로그아웃 후 해당 로그인 계열의 Access는 다음 요청부터 즉시 거부합니다. 로그인 실패 횟수 제한·키 순환/폐기 관리·프론트엔드 로그인 화면은 이번 범위에 없습니다. 토큰은 개인 정보 암호화 수단이 아니므로 사용자 ID와 검증용 claim만 담습니다.
+
+## Refresh·로그아웃 사용 절차
+
+확정 정책은 **Access 15분, Refresh 최초 로그인부터 7일, 로그아웃 후 Access 즉시 차단**입니다. Refresh를 교체해도 7일 만료일은 연장하지 않습니다. 로그인마다 독립된 계열을 만들며 재사용 감지/로그아웃은 해당 계열만 폐기합니다.
+
+1. `GET /api/v1/auth/csrf`를 credentials 포함으로 호출합니다. HttpOnly CSRF 쿠키와 JSON `{token,headerName}`을 받습니다. JSON의 마스킹된 token을 헤더에 사용하며 쿠키를 JS로 읽을 필요가 없습니다.
+2. 로그인 POST에 CSRF 쿠키, 위 headerName/token, JSON 자격 증명을 전달합니다. 브라우저의 Origin은 설정된 목록과 일치해야 하며 CLI 클라이언트도 명시적 Origin 헤더를 보내야 합니다.
+3. 로그인 응답의 Access는 메모리에 보관하고 업무 API에 Bearer 헤더로 전달합니다. Refresh 원문은 `__Secure-jashop_refresh` HttpOnly 쿠키에만 전달되며 JSON에는 없습니다.
+4. `POST /api/v1/auth/refresh`에 credentials와 CSRF 헤더를 전달하면 새 Access/Refresh를 받습니다. 유효한 Access 헤더는 필요하지 않습니다. Refresh가 누락/만료/폐기/재사용이면 실패하고 Refresh 쿠키를 제거합니다.
+5. `POST /api/v1/auth/logout`에 같은 쿠키/CSRF/Origin을 보내면 해당 계열을 폐기하고 쿠키를 제거하며 204를 반환합니다. 회전된 이전 쿠키도 같은 계열을 폐기할 수 있습니다. 누락/알 수 없는 쿠키는 다른 계열을 건드리지 않고 204로 쿠키만 제거합니다.
+
+Refresh 쿠키는 Secure/HttpOnly/SameSite=Strict/Path=/api/v1/auth이며 7일 중 남은 시간만 Max-Age로 설정합니다. CSRF 쿠키도 Secure/HttpOnly/SameSite=Strict/같은 Path입니다. 실제 브라우저 사용에는 **HTTPS와 같은 사이트 구성**이 필요합니다. 기본 개발 origin은 기존 http://localhost:5173을 유지하므로 HTTPS 프론트에서는 JASHOP_SECURITY_ALLOWED_ORIGINS를 실제 HTTPS origin으로 지정하고 HTTPS 서버/프록시를 구성합니다. 서로 다른 사이트의 프론트·API 배포는 Strict 쿠키 정책으로 지원하지 않습니다.
+
+CORS는 credentials=true와 명시적 origin 목록을 사용하며 와일드카드 origin은 허용하지 않습니다. 허용 헤더에 X-XSRF-TOKEN을 추가했습니다. CSRF·Origin 검사는 로그인/refresh/logout POST 모두에 적용하고 Bearer 업무 API의 인증 방법은 유지합니다.
+
+동일 Refresh를 동시에 두 번 사용하면 한 번만 회전하고 나머지는 재사용으로 판단해 **승자가 받은 새 토큰까지 그 계열 전체를 폐기**합니다. 프론트엔드는 탭/요청 간 재발급을 조정해야 하며 응답 유실 후 이전 Refresh 재시도에도 재로그인이 필요할 수 있습니다. 유예 기간은 두지 않았습니다.
+
+Access의 sid가 DB의 활성 계열과 일치하는지 매 요청 확인합니다. 따라서 DB 조회 비용이 추가되며, 이 변경 전 sid 없는 기존 Access는 재로그인이 필요합니다. 로그아웃 완료 전에 이미 인증 검사를 통과한 진행 중 요청을 취소하지는 않습니다. 계열 루트 행은 회전 후에도 폐기/만료 판단에 사용하므로 보존하며 정리 작업은 아직 구현하지 않았습니다. 기존 Compose DB에 V5를 직접 적용하거나 실제 로그인 데이터를 변경하지 않았습니다.
 
 ## 문서
 
@@ -199,10 +217,11 @@ export JASHOP_JWT_SECRET_BASE64="$(openssl rand -base64 32)"
 - **완료(Phase 2-2B):** 공개 회원가입 API(`POST /api/v1/auth/signup`), DTO 검증, BCrypt 비밀번호 해시, 중복 이메일 409 처리. 가입자는 STAFF/PENDING/소속 없음으로 생성되며 토큰·세션은 발급하지 않습니다.
 - **완료(Phase 2-2C):** 운영 전용 초기 MANAGER 일회성 생성, DB 잠금/완료 기록, 계정 상태·총괄·담당 매장 부매니저 인가 서비스.
 - **완료(Phase 2-3):** Store 목록/상세/생성/이름 변경/비활성화 API, 페이지·활성 필터·ID 오름차순 정렬, 변경 행 잠금 및 인가 연결. 인증 principal 발급은 Phase 3-1의 Access JWT 인증으로 연결했습니다.
-- **최신 검증(2026-11-11):** 백엔드 `./gradlew test --offline` 전체 237건 통과(실패/오류/스킵 0). 로그인/JWT 신규 47건 포함.
+- **최신 검증(2026-11-11):** 백엔드 `./gradlew test --offline` 전체 267건 통과(실패/오류/스킵 0). Refresh/로그아웃 통합 29건 및 고정 TTL 검증 1건 추가.
 - **완료(Phase 2-4):** 총괄 전용 승인 대기 목록·직원/부매니저 승인·거절 API, 대상 사용자/매장 행 잠금, 승인자·시각 및 선택적 거절 사유(V4) 저장.
 - **완료(Phase 3-1):** 이메일/비밀번호 로그인, Access JWT 발급·검증, 내 정보 조회 및 기존 업무 API Bearer 인증 연결.
-- **진행 예정:** Refresh·로그아웃/AuthSession, 나머지 업무 DDL·API·통합 테스트, PWA 화면 및 Web Push 실기기 검증, CI/CD·AWS 배포.
+- **완료(Phase 3-2):** Refresh 7일 절대 만료·회전·재사용 감지, 현재 로그인 계열 로그아웃 및 Access 즉시 차단, CSRF/Origin 검증, V5 auth_sessions.
+- **진행 예정:** 나머지 업무 DDL·API·통합 테스트, PWA 화면 및 Web Push 실기기 검증, CI/CD·AWS 배포.
 - **MVP 제외:** POS 연동, 자동 재고 차감, 불량·유실, 급여 계산, 인력 자동 추천, AI 음성/자연어 검색.
 
 각 기능의 **확정 정책과 구현 제안은 [결정 기록](docs/06-decisions.md)에서 구분**합니다. 코드와 문서가 달라지면 변경 이유와 테스트 결과를 함께 업데이트합니다.

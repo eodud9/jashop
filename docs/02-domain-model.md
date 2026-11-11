@@ -36,7 +36,7 @@ User는 가입 대기 생성·역할/상태 enum·Repository까지 구현했다.
 ### 가입 심사 구현
 
 UserReviewService는 ACTIVE MANAGER 인가 후 대상 User 행을 잠근다. 승인은 추가로 Store 행을 잠가 ACTIVE를 검사한다. 잠금 순서는 대상 User → 소속 Store이며 상태 전이와 저장은 같은 트랜잭션이다. 승인/승인 또는 승인/거절 경쟁에서 한 번만 성공한다. 승인 후 나중에 매장이 비활성화돼도 기존 사용자를 자동 변경하지 않는다.
-V4 rejectionReason은 선택적 거절 사유다. 거절자의 별도 감사 필드는 없고 거절 시각은 updatedAt에 기록한다. 심사 목록·응답은 비밀번호 해시를 제외한 DTO로 제공한다. 로그인·Access JWT는 3-1에서 구현했다. Refresh·재심사·역할 변경/비활성화 API는 미구현이다.
+V4 rejectionReason은 선택적 거절 사유다. 거절자의 별도 감사 필드는 없고 거절 시각은 updatedAt에 기록한다. 심사 목록·응답은 비밀번호 해시를 제외한 DTO로 제공한다. 로그인·Access JWT는 3-1에서 구현했다. Refresh·로그아웃은 3-2로 구현했고 재심사·역할 변경/비활성화 API는 미구현이다.
 
 ### Store
 
@@ -46,9 +46,11 @@ V4 rejectionReason은 선택적 거절 사유다. 거절자의 별도 감사 필
 
 ### Access 인증 구현
 
-로그인은 기존 BCrypt 해시를 검증한 후 ACTIVE 계정에만 Access JWT를 발급한다. JWT는 사용자 ID와 검증 claim만 담고 역할/상태는 기존 DB 서비스에서 확인한다. 내 정보 조회도 같은 ACTIVE 검사를 사용한다. 계정/매장 데이터 구조는 바꾸지 않았으며 Refresh/AuthSession은 아직 구현하지 않았다.
+로그인은 기존 BCrypt 해시를 검증한 후 ACTIVE 계정에만 Access JWT를 발급한다. JWT는 사용자 ID와 검증 claim만 담고 역할/상태는 기존 DB 서비스에서 확인한다. 내 정보 조회도 같은 ACTIVE 검사를 사용한다. 계정/매장 데이터 구조는 바꾸지 않았으며 Refresh/AuthSession·로그아웃도 3-2로 구현했다.
 
 ### AuthSession
+
+**구현(3-2):** V5 auth_sessions에서 최초 로그인부터 7일 만료를 유지하며 토큰별 행을 추가한다. 가장 작은 ID의 루트 행에 계열 폐기 시각을 보존한다. 정상 회전의 revokedAt과 루트의 familyRevokedAt은 별개다. Access는 15분이며 sid로 계열 상태를 매 요청 조회하므로 로그아웃/재사용/7일 만료 뒤 다음 요청부터 거부된다. User 비활성 상태의 재발급은 계열도 폐기한다. 요청 이미 실행 중인 업무를 취소하는 기능은 아니다.
 
 - Refresh Token 원문을 보관하지 않는다. `tokenHash`, `userId`, `familyId`(회전 계열), `expiresAt`, `revokedAt`, `replacedBy` 등의 필드로 발급·회전·폐기한다.
 - Refresh 회전 시 이전 토큰을 폐기하고 새 토큰을 발급한다. 재사용 탐지 시 관련 세션을 무효화하는 정책은 [권장]이며 동시 Refresh 경쟁을 통합 테스트한다.

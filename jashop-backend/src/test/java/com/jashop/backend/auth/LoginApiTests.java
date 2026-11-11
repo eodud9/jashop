@@ -79,6 +79,9 @@ class LoginApiTests extends JwtTestSupport {
     @Autowired JwtDecoder jwtDecoder;
     @Autowired LoginService loginService;
     String hash;
+    @Autowired com.jashop.backend.auth.session.application.AuthSessionService sessions;
+    String managerFamily;
+    String staffFamily;
     Long managerId;
     Long staffId;
     Long storeId;
@@ -91,6 +94,8 @@ class LoginApiTests extends JwtTestSupport {
     @BeforeEach
     void prepareIsolatedDatabase() {
         jdbc.update("UPDATE users SET approved_by = NULL");
+        jdbc.update("UPDATE auth_sessions SET replaced_by_id = NULL");
+        jdbc.update("DELETE FROM auth_sessions");
         users.deleteAll();
         stores.deleteAll();
         storeId = stores.saveAndFlush(Store.create("LOGIN", "로그인 매장", NOW)).getId();
@@ -98,11 +103,13 @@ class LoginApiTests extends JwtTestSupport {
         User staff = User.createPending("staff@example.com", hash, "직원", NOW);
         staff.approve(UserRole.STAFF, storeId, managerId, NOW);
         staffId = users.saveAndFlush(staff).getId();
+        managerFamily = sessions.open(managerId).familyId();
+        staffFamily = sessions.open(staffId).familyId();
     }
 
     @Test
-    void loginNormalizesEmailAndReturnsSignedAccessWithoutCookieOrSecrets(CapturedOutput output) throws Exception {
-        var result = mvc.perform(post("/api/v1/auth/login").contentType(MediaType.APPLICATION_JSON)
+    void loginNormalizesEmailAndReturnsAccessWithSecureRefreshCookie(CapturedOutput output) throws Exception {
+        var result = mvc.perform(post("/api/v1/auth/login").with(cookieAuthCsrf()).contentType(MediaType.APPLICATION_JSON)
                         .content(body(" MANAGER@EXAMPLE.COM ", PASSWORD)))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.tokenType").value("Bearer"))
                 .andExpect(jsonPath("$.expiresIn").value(900)).andExpect(jsonPath("$.user.id").value(managerId))
@@ -110,7 +117,7 @@ class LoginApiTests extends JwtTestSupport {
                 .andExpect(jsonPath("$.user.email").value("manager@example.com"))
                 .andExpect(jsonPath("$.user.passwordHash").doesNotExist())
                 .andExpect(header().string(CACHE_CONTROL, "no-store"))
-                .andExpect(header().doesNotExist(SET_COOKIE)).andReturn();
+                .andExpect(header().string(SET_COOKIE, org.hamcrest.Matchers.containsString("HttpOnly"))).andReturn();
         String response = result.getResponse().getContentAsString();
         String token = JSON.readTree(response).get("accessToken").asText();
         Jwt jwt = jwtDecoder.decode(token);
@@ -158,14 +165,14 @@ class LoginApiTests extends JwtTestSupport {
         Long rejected = users.saveAndFlush(User.createPending("reject@example.com", hash, "거절", NOW)).getId();
         mvc.perform(post("/api/v1/admin/users/{id}/reject", rejected).header(AUTHORIZATION, "Bearer " + token))
                 .andExpect(status().isOk());
-        mvc.perform(post("/api/v1/auth/login").contentType(MediaType.APPLICATION_JSON).content(body("reject@example.com", PASSWORD)))
+        mvc.perform(post("/api/v1/auth/login").with(cookieAuthCsrf()).contentType(MediaType.APPLICATION_JSON).content(body("reject@example.com", PASSWORD)))
                 .andExpect(status().isForbidden()).andExpect(jsonPath("$.code").value("ACCOUNT_REJECTED"));
     }
 
     @Test
     void missingEmailAndWrongPasswordUseSameUnauthorizedResponse() throws Exception {
         for (String email : List.of("missing@example.com", "manager@example.com")) {
-            mvc.perform(post("/api/v1/auth/login").contentType(MediaType.APPLICATION_JSON).content(body(email, "wrong-password")))
+            mvc.perform(post("/api/v1/auth/login").with(cookieAuthCsrf()).contentType(MediaType.APPLICATION_JSON).content(body(email, "wrong-password")))
                     .andExpect(status().isUnauthorized()).andExpect(jsonPath("$.code").value("INVALID_CREDENTIALS"))
                     .andExpect(jsonPath("$.accessToken").doesNotExist()).andExpect(header().doesNotExist(SET_COOKIE));
         }
@@ -175,10 +182,10 @@ class LoginApiTests extends JwtTestSupport {
     @ValueSource(strings = {"PENDING", "REJECTED", "INACTIVE"})
     void nonActiveAccountsCannotLoginAndWrongPasswordDoesNotDiscloseStatus(String state) throws Exception {
         jdbc.update("UPDATE users SET status = ? WHERE id = ?", state, staffId);
-        mvc.perform(post("/api/v1/auth/login").contentType(MediaType.APPLICATION_JSON).content(body("staff@example.com", PASSWORD)))
+        mvc.perform(post("/api/v1/auth/login").with(cookieAuthCsrf()).contentType(MediaType.APPLICATION_JSON).content(body("staff@example.com", PASSWORD)))
                 .andExpect(status().isForbidden()).andExpect(jsonPath("$.code").value("ACCOUNT_" + state))
                 .andExpect(jsonPath("$.accessToken").doesNotExist());
-        mvc.perform(post("/api/v1/auth/login").contentType(MediaType.APPLICATION_JSON).content(body("staff@example.com", "wrong-password")))
+        mvc.perform(post("/api/v1/auth/login").with(cookieAuthCsrf()).contentType(MediaType.APPLICATION_JSON).content(body("staff@example.com", "wrong-password")))
                 .andExpect(status().isUnauthorized()).andExpect(jsonPath("$.code").value("INVALID_CREDENTIALS"));
     }
 
@@ -199,7 +206,7 @@ class LoginApiTests extends JwtTestSupport {
         jdbc.update("UPDATE users SET role='STAFF',home_store_id=? WHERE id=?", storeId, managerId);
         mvc.perform(get("/api/v1/admin/users/pending").header(AUTHORIZATION, "Bearer " + token))
                 .andExpect(status().isForbidden()).andExpect(jsonPath("$.code").value("ACCESS_DENIED"));
-        String claimedManager = signed(claims -> { claims.put("sub", staffId.toString()); claims.put("role", "MANAGER"); });
+        String claimedManager = signed(claims -> { claims.put("sub", staffId.toString()); claims.put("role", "MANAGER"); claims.put("sid", staffFamily); });
         mvc.perform(post("/api/v1/stores").header(AUTHORIZATION, "Bearer " + claimedManager)
                         .contentType(MediaType.APPLICATION_JSON).content("{\"code\":\"FORGED\",\"name\":\"위조\"}"))
                 .andExpect(status().isForbidden());
@@ -252,7 +259,7 @@ class LoginApiTests extends JwtTestSupport {
         // Spring의 발급기는 이 조합을 거부하므로 검증 테스트용 잘못된 토큰을 하위 JOSE API로 만든다.
         var claims = new com.nimbusds.jwt.JWTClaimsSet.Builder().issuer("https://jashop.local")
                 .audience("jashop-api").subject(managerId.toString()).issueTime(java.util.Date.from(NOW))
-                .expirationTime(java.util.Date.from(NOW.minusSeconds(1))).claim("token_use", "access").build();
+                .expirationTime(java.util.Date.from(NOW.minusSeconds(1))).claim("token_use", "access").claim("sid", managerFamily).build();
         var jwt = new com.nimbusds.jwt.SignedJWT(new com.nimbusds.jose.JWSHeader.Builder(
                 com.nimbusds.jose.JWSAlgorithm.HS256).type(com.nimbusds.jose.JOSEObjectType.JWT).build(), claims);
         jwt.sign(new com.nimbusds.jose.crypto.MACSigner(Base64.getDecoder().decode(JWT_SECRET)));
@@ -296,18 +303,18 @@ class LoginApiTests extends JwtTestSupport {
             "{\"email\":\"manager@example.com\",\"password\":\" \"}",
             "{\"email\":\"manager@example.com\",\"password\":\"password\",\"role\":\"MANAGER\"}", "null", "{"})
     void invalidLoginBodyIsRejected(String body) throws Exception {
-        mvc.perform(post("/api/v1/auth/login").contentType(MediaType.APPLICATION_JSON).content(body))
+        mvc.perform(post("/api/v1/auth/login").with(cookieAuthCsrf()).contentType(MediaType.APPLICATION_JSON).content(body))
                 .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("VALIDATION_FAILED"));
     }
 
     @Test
     void loginEnforcesBcryptByteBoundaryAndPreservesPasswordWhitespace() throws Exception {
-        mvc.perform(post("/api/v1/auth/login").contentType(MediaType.APPLICATION_JSON).content(body("manager@example.com", "가".repeat(25))))
+        mvc.perform(post("/api/v1/auth/login").with(cookieAuthCsrf()).contentType(MediaType.APPLICATION_JSON).content(body("manager@example.com", "가".repeat(25))))
                 .andExpect(status().isBadRequest());
         String padded = " padded-password ";
         users.saveAndFlush(User.createInitialManager("padded@example.com", passwords.encode(padded), "공백", NOW));
         assertThat(login("padded@example.com", padded)).isNotBlank();
-        mvc.perform(post("/api/v1/auth/login").contentType(MediaType.APPLICATION_JSON).content(body("padded@example.com", padded.strip())))
+        mvc.perform(post("/api/v1/auth/login").with(cookieAuthCsrf()).contentType(MediaType.APPLICATION_JSON).content(body("padded@example.com", padded.strip())))
                 .andExpect(status().isUnauthorized());
     }
 
@@ -316,21 +323,21 @@ class LoginApiTests extends JwtTestSupport {
         mvc.perform(options("/api/v1/stores").header(ORIGIN, "http://localhost:5173")
                         .header(ACCESS_CONTROL_REQUEST_METHOD, "PATCH").header(ACCESS_CONTROL_REQUEST_HEADERS, "authorization,content-type"))
                 .andExpect(status().isOk()).andExpect(header().string(ACCESS_CONTROL_ALLOW_ORIGIN, "http://localhost:5173"))
-                .andExpect(header().doesNotExist(ACCESS_CONTROL_ALLOW_CREDENTIALS));
+                .andExpect(header().string(ACCESS_CONTROL_ALLOW_CREDENTIALS, "true"));
         mvc.perform(options("/api/v1/stores").header(ORIGIN, "https://untrusted.example")
                         .header(ACCESS_CONTROL_REQUEST_METHOD, "PATCH"))
                 .andExpect(status().isForbidden());
     }
 
     @Test
-    void refreshAndLogoutAreNotOpenedByPublicLoginMatcher() throws Exception {
+    void refreshAndLogoutRejectRequestsWithoutOriginAndCsrf() throws Exception {
         mvc.perform(post("/api/v1/auth/refresh")).andExpect(status().isForbidden());
         mvc.perform(post("/api/v1/auth/logout")).andExpect(status().isForbidden());
         mvc.perform(get("/login")).andExpect(status().isUnauthorized());
     }
 
     private String login(String email, String password) throws Exception {
-        var result = mvc.perform(post("/api/v1/auth/login").contentType(MediaType.APPLICATION_JSON).content(body(email, password)))
+        var result = mvc.perform(post("/api/v1/auth/login").with(cookieAuthCsrf()).contentType(MediaType.APPLICATION_JSON).content(body(email, password)))
                 .andExpect(status().isOk()).andReturn();
         return JSON.readTree(result.getResponse().getContentAsString()).get("accessToken").asText();
     }
@@ -346,7 +353,7 @@ class LoginApiTests extends JwtTestSupport {
     private String encode(JwtEncoder encoder, Consumer<Map<String, Object>> changes) {
         var claims = JwtClaimsSet.builder().issuer("https://jashop.local").audience(List.of("jashop-api"))
                 .subject(managerId.toString()).issuedAt(NOW).expiresAt(NOW.plusSeconds(900))
-                .claim("token_use", "access").claims(changes).build();
+                .claim("token_use", "access").claim("sid", managerFamily).claims(changes).build();
         return encoder.encode(JwtEncoderParameters.from(JwsHeader.with(MacAlgorithm.HS256).type("JWT").build(), claims)).getTokenValue();
     }
 

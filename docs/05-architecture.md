@@ -212,7 +212,7 @@ DB_USERNAME은 필요할 때 지정하며 기본값은 jashop이다. 현재 DB U
 - 이력 없는 비어 있지 않은 DB는 자동 baseline하지 않는다. 기존 스키마를 검토한 후 도입한다.
 - V2는 users를 추가하며 User는 ID 기반 매장/승인자 참조와 문자열 enum을 사용한다. `@JdbcTypeCode(VARCHAR)`로 MySQL native ENUM 대신 ERD의 VARCHAR 매핑을 유지한다.
 - 회원가입은 `auth.api` DTO/Controller → `auth.application.SignupService` → `UserRepository`로 구성한다. 서비스 트랜잭션에서 BCrypt 해시와 Clock 시각을 사용하며 saveAndFlush로 동시 중복 예외를 변환한다.
-- 초기 MANAGER 생성은 auth.bootstrap, 인가 서비스는 user.application에 구현했다. Store API/Service와 관리자 가입 심사 API는 인가 서비스와 연결했으며 로그인·Access JWT는 3-1로 구현했으며 Refresh/로그아웃은 미구현이다.
+- 초기 MANAGER 생성은 auth.bootstrap, 인가 서비스는 user.application에 구현했다. Store API/Service와 관리자 가입 심사 API는 인가 서비스와 연결했으며 로그인·Access JWT는 3-1, Refresh/로그아웃 및 즉시 Access 차단은 3-2로 구현했다.
 
 ### 5.2 테스트와 검증 기록
 
@@ -263,10 +263,10 @@ cd jashop-backend
 - Redis 데이터 보존이 필요하면 선언된 redis_data 볼륨을 서비스에 연결.
 - 환경별 연결 설정이 필요해지면 local 프로파일 또는 URL/호스트 환경변수 도입.
 
-## 6. 인증·인가 전략 [회원가입·부트스트랩·인가 서비스 구현]
+## 6. 인증·인가 전략 [로그인·JWT·Refresh·로그아웃 구현]
 
 **현재:** `PasswordConfig`는 DelegatingPasswordEncoder + BCrypt(12)를 제공한다. 기존 Security 의존성만 사용하며 새 라이브러리는 추가하지 않았다. 비밀번호 원문과 해시는 응답·DTO 문자열 표현에 노출하지 않는다.
-`SecurityConfig`는 가입 POST 전용 STATELESS 공개 체인, Store 전용 STATELESS 체인, 관리자 User 전용 STATELESS 체인, 나머지 기본 인증 체인을 순서대로 분리한다. Store 체인은 CSRF를 유지하며 Basic/Form 인증을 제공하지 않는다. CSRF 제외는 가입 체인에만 적용하며, 나머지는 기존 Boot의 기본 인증·CSRF 정책을 유지한다. 이 기본 인증은 User 로그인 구현이 아니며 초기 MANAGER 부트스트랩을 대체하지 않는다. JWT 구현 단계에서 기본 인증 체인을 교체한다.
+`SecurityConfig`는 가입 POST 공개 체인, 로그인/refresh/logout/csrf 쿠키 체인, 나머지 Bearer 체인으로 분리한다. HTTP 세션 인증과 Basic/Form은 사용하지 않는다. 쿠키 인증 POST는 CSRF/Origin을 검사하고 Bearer 업무 API는 기존 DB 인가를 유지한다. 현재 계약은 마지막의 Phase 3-2 절을 따른다.
 
 비밀번호 길이 검증은 BCrypt의 72바이트 한계에서 조용한 잘림/런타임 오류를 방지한다. 비용 12의 운영 응답 시간과 부하는 배포 환경에서 별도로 측정한다.
 
@@ -413,3 +413,17 @@ Spring Security 기반 로그인/Access JWT 검증 및 DB 계정 상태·역할 
 - Access TTL 기본 900초(허용 설정 1~86400초), issuer 기본 https://jashop.local, audience jashop-api다. 환경변수 및 실행 절차는 README를 따른다. 키 재주입/순환은 운영자의 책임이며 재시작 시 임의의 기본 키를 생성하지 않는다. 테스트만 프로세스별 무작위 키를 생성한다.
 - CurrentUserController는 검증된 principal로 기존 인가 서비스를 호출하고 자격 증명을 제외한 내 정보 DTO를 반환한다. 로그인/내 정보 응답은 no-store이며 인증 쿠키·서버 세션을 생성하지 않는다.
 - Refresh/AuthSession/로그아웃·세션별 Access 폐기·로그인 실패 제한·프론트 화면은 이번 범위에 없다. Access 만료 후 재로그인한다. 기존 V1~V4 및 Compose DB/볼륨은 변경하지 않는다.
+
+
+## Refresh·로그아웃 및 Access 즉시 차단 (2026-11-11, Phase 3-2)
+
+- 사용자 확정: Access 900초, Refresh 604800초 절대 만료, 로그아웃 후 Access 즉시 차단. 기존 TTL 설정은 900만 허용하고 Refresh 회전은 만료일을 늘리지 않는다.
+- V5 AuthSession은 토큰별 해시/회전 이력을 저장한다. 루트 ID(min id)를 스칼라 조회 후 PK PESSIMISTIC_WRITE 잠금 → 현재 토큰 locking read → User locking read 순서로 처리한다. 원문은 무작위 32바이트 Base64URL이며 DB에는 SHA-256만 저장한다. 고엔트로피 토큰의 검색 가능한 해시에 BCrypt를 사용하지 않는다.
+- 루트 familyRevokedAt과 전체 토큰 revokedAt으로 폐기를 기록한다. 정상 회전은 루트 token을 폐기해도 계열은 유지한다. 모든 변이가 같은 루트 PK를 잠그므로 재발급/로그아웃/재사용 감지를 직렬화한다. 잠금 전 엔티티 캐시와 MySQL RR 스냅샷을 피하기 위해 초기 조회는 루트 ID만 읽고 현재 토큰·사용자는 locking read한다.
+- AuthSessionService는 재사용/만료/비활성 상태의 폐기를 커밋하기 위해 오류 결과를 반환한다. Controller는 서비스 프록시 반환 후 쿠키 삭제와 BusinessException 응답을 수행한다. 정상 응답 쿠키도 커밋 후에만 전달한다. DB 실패는 롤백하고 성공으로 응답하지 않는다.
+- 표준 JWT 검증/필수 sid 확인 후 AuthSessionService가 DB 루트의 소유자/만료/familyRevokedAt을 검사하고 기존 UserPrincipal을 만든다. HTTP 세션은 사용하지 않으나 DB 세션 유효성 조회가 매 요청 추가된다. 기존 sid 없는 토큰은 재로그인이 필요하다.
+- 세 체인으로 분리한다: 가입 POST(쿠키 없음, CSRF 제외), 로그인/refresh/logout/csrf(쿠키 인증, 별도 CSRF·Origin), 나머지 Bearer 업무 API. cookie 체인에는 Resource Server 필터를 넣지 않아 만료 Access로도 재발급/로그아웃할 수 있다.
+- CookieCsrfTokenRepository와 기본 XOR 요청 핸들러로 CSRF cookie+JSON 마스킹 토큰을 제공한다. HttpOnly/Secure/Strict/Path=/api/v1/auth 쿠키를 사용해 JS는 JSON token을 헤더로 보낸다. AuthOriginFilter는 unsafe 인증 POST에 정확한 허용 Origin을 요구한다. CORS credentials=true와 X-XSRF-TOKEN을 추가하고 와일드카드/경로 포함 origin 설정을 거부한다.
+- 로그아웃/재사용은 현재 로그인 계열만 폐기하며 타 로그인은 유지한다. 같은 Refresh 동시 사용은 한 번 회전 후 재사용으로 계열 전체가 폐기되는 엄격한 정책이다. 브라우저/탭 간 단일 Refresh 요청 조정과 응답 유실 시 재로그인이 필요할 수 있다. 유예·자동 재시도는 없다.
+- 실제 브라우저의 Secure/Strict 쿠키 사용에는 HTTPS·같은 사이트 배포가 필요하다. 기본 개발 origin은 이전 값을 유지하므로 HTTPS 환경에 맞게 명시 설정한다. 자동 테스트는 실제 MySQL/보안 필터/쿠키 헤더를 검증하며 실브라우저 TLS 배포 E2E는 범위에 없다.
+- 계열 루트/이력 정리·전체 기기 로그아웃·로그인 실패 제한·키 순환·진행 중 요청 취소는 추가하지 않는다. 기존 V1~V4, Compose DB/볼륨은 유지한다.

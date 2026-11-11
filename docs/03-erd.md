@@ -4,7 +4,7 @@
 - **17개 테이블은 확정된 도메인 구성**이며, 이 문서의 상세 SQL 타입·추가 컬럼·인덱스는 구현 기준안이다.
 - 실제 구현 전 Flyway DDL을 작성하고 MySQL Testcontainers로 검증한다. **이 문서 자체가 이미 실행된 마이그레이션은 아니다.**
 
-**구현 상태(2026-11-09):** V1 `stores`와 V2 `users`를 구현했다. 나머지 15개 업무 테이블은 미구현이다. V2는 별도 Testcontainers MySQL에서 검증하며 기존 로컬 DB에 자동 적용하지 않는다.
+**구현 상태(2026-11-11):** V1 stores, V2 users, V5 auth_sessions를 구현했다. 나머지 14개 업무 테이블은 미구현이다. V2는 별도 Testcontainers MySQL에서 검증하며 기존 로컬 DB에 자동 적용하지 않는다.
 V4는 users의 선택적 거절 사유 컬럼(rejection_reason)을 추가한다. 기존 사용자 행은 유지한다.
 V3 `manager_bootstrap` 운영 테이블을 추가했다(2026-11-10). `id TINYINT PK CHECK(id=1)`, `user_id BIGINT NULL FK users(id)`, `completed_at DATETIME(6) NULL`이며 사용자/완료 시각은 둘 다 NULL 또는 둘 다 NOT NULL이다. 초기 id=1 행을 생성하고 FOR UPDATE로 잠근 뒤 사용자 생성과 완료 기록을 한 트랜잭션으로 커밋한다. 완료 기록은 관리자 비활성화 후에도 보존한다.
 목표 테이블은 업무 17개 + 운영 1개다. Flyway 이력 테이블은 이와 별개의 도구 관리 테이블이다.
@@ -73,6 +73,7 @@ erDiagram
         datetime expires_at
         datetime revoked_at
         bigint replaced_by_id FK
+        datetime family_revoked_at
         datetime created_at
     }
     WORK_SCHEDULES {
@@ -282,6 +283,8 @@ Java의 생성/수정 시각은 `Instant`, JDBC는 UTC로 해석하는 TIMESTAMP
 
 ### 03. `auth_sessions` — Refresh Token 회전/폐기
 
+V5로 구현했다. 계열에서 가장 작은 ID가 불변 루트이며 계열 폐기 시각은 이 루트의 family_revoked_at을 기준으로 판단한다. 루트의 token revoked_at은 정상 회전에도 채워지므로 계열 폐기와 구분한다. family_id/token_hash는 ASCII 이진 비교 CHAR, token_hash UNIQUE, user/replacedBy FK, expiresAt > issuedAt CHECK 및 (family_id,id)/user_id 인덱스를 둔다. 루트·회전 이력은 보존하며 정리 기능은 미구현이다. 루트 PK를 잠가 모든 회전/폐기를 직렬화하고 Access는 루트의 사용자/만료/계열 폐기 상태를 조회한다.
+
 | 컬럼 | MySQL 타입(권장) | 제약 | 의미 |
 |---|---|---|---|
 | `id` | `BIGINT` | PK NOT NULL | 세션 ID |
@@ -291,7 +294,8 @@ Java의 생성/수정 시각은 `Instant`, JDBC는 UTC로 해석하는 TIMESTAMP
 | `issued_at` | `DATETIME(6)` | NOT NULL | 발급 시각 |
 | `expires_at` | `DATETIME(6)` | NOT NULL | 만료 시각 |
 | `revoked_at` | `DATETIME(6)` | NULL | 폐기 시각 |
-| `replaced_by_id` | `BIGINT` | NULL FK→auth_sessions.id | 다음 회전 세션(선택) |
+| `replaced_by_id` | `BIGINT` | NULL FK→auth_sessions.id | 다음 회전 세션 |
+| `family_revoked_at` | `DATETIME(6)` | NULL | 루트 행에 기록하는 로그인 계열 폐기 시각 |
 | `created_at` | `DATETIME(6)` | NOT NULL | 행 생성 시각 |
 
 ### 04. `work_schedules` — 예정 근무 일정
