@@ -260,3 +260,15 @@
 - 이유: 기존 엔티티의 변경 규칙과 JPA/DB 제약을 재사용한다. 페이지 응답은 Spring Page 직렬화에 의존하지 않는 DTO로 고정했다. 잠금은 검증과 변경을 묶어 이름 변경이 비활성 상태를 덮어쓰는 일을 막는다. 새 라이브러리나 스키마 변경이 필요 없어 V1~V3는 유지한다.
 - 한계: 인증 제공자·사용자 승인·현재 근무자 조회는 미구현이다. Store 잠금은 사용자 권한 변경까지 잠그지 않으며 대기 시간은 MySQL 설정을 따른다. 기존 Compose DB/볼륨은 변경하지 않는다.
 - 검증: `./gradlew test --offline` 전체 142건 통과(기존 99 + 신규 43, 실패/오류/스킵 0). 실제 MySQL 잠금 대기/다른 매장 진행, 동시 코드 생성, 동시 이름 변경·비활성화 및 운영 보안 필터를 검증했다. 미인증 Authentication의 403 응답 1건은 401로 구분하도록 수정한 뒤 해결했다.
+
+
+### D-20261110-03: 총괄 전용 가입 승인·거절과 동시 심사 제어
+
+- 상태: 채택.
+- 선택: ACTIVE MANAGER 전용 대기 목록/승인/거절 API와 DTO를 user 기능에 추가했다. pending은 page=0/size=20, 최대 100, id ASC이며 PENDING만 반환한다. 승인 역할은 STAFF/ASSISTANT_MANAGER이고 ACTIVE 소속 매장이 필수다. MANAGER 부여·사용자 역할 변경·비활성화·재심사는 이번 범위가 아니다.
+- 도메인: User.approve/reject가 PENDING 상태와 입력을 검증한다. 승인은 역할/소속/승인자/승인 시각/updatedAt을 기록하고 ACTIVE로 전환한다. 거절은 REJECTED/rejectionReason/updatedAt을 기록하며 자격 증명과 승인 정보는 변경하지 않는다. 반복 심사는 USER_NOT_PENDING/409다.
+- 저장: API 명세의 선택적 reason을 실제로 보존하기 위해 V4 users.rejection_reason VARCHAR(500) NULL을 추가했다. 본문/사유 생략은 null이며 최대 500자 원문을 보존한다. 거절자·별도 거절 시각 컬럼/심사 이력 테이블은 추가하지 않으며 현 흐름의 거절 시각은 updatedAt이다. V1~V3와 기존 데이터는 유지한다.
+- 잠금: 대상 User → 소속 Store 순서의 PESSIMISTIC_WRITE 잠금으로 같은 사용자 심사는 한 번만 성공하고 승인 중 매장 비활성화도 직렬화한다. 비활성화가 먼저 커밋하면 STORE_INACTIVE/409이며 승인이 먼저 커밋한 뒤 매장을 비활성화하는 것은 허용한다. 기존 사용자 자동 변경은 하지 않는다.
+- 보안: 기존 UserPrincipal과 서비스 인가를 재사용한다. StoreSecurityErrorHandler를 ApiSecurityErrorHandler로 이름 변경해 보호 API들의 필터 오류에 재사용한다. 관리자 User 전용 STATELESS 체인은 CSRF를 유지하며 Basic/Form 인증을 제공하지 않는다. 비밀번호·해시를 DTO에 노출하지 않고 거절 요청 toString은 내용을 숨긴다.
+- 한계: 로그인/JWT 발급은 여전히 미구현이며 테스트 인증 객체로 운영 필터/DB를 검증한다. 요청자 권한 변경까지 잠그거나 잠금 timeout을 자동 재시도하지 않는다. 기존 Compose DB/볼륨에는 V4를 적용하거나 실사용자를 승인하지 않았다.
+- 검증: `./gradlew test --offline` 전체 190건 통과(기존 142 + 신규 API/MySQL 42 + 도메인 6, 실패/오류/스킵 0). 동시 심사 단일 성공, Store 잠금 대기/비활성 커밋 후 승인 거부와 V3→V4 데이터 보존·재실행을 실제 MySQL에서 확인했다.

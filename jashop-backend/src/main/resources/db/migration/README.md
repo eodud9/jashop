@@ -1,9 +1,9 @@
 # Flyway migrations
 
-`V1__create_stores.sql`은 stores, `V2__create_users.sql`은 users를 생성한다. V3은 초기 관리자 생성 잠금/완료 기록용 manager_bootstrap 운영 테이블을 생성한다. 나머지 업무 테이블은 아직 없다.
+`V1__create_stores.sql`은 stores, `V2__create_users.sql`은 users를 생성한다. V3은 초기 관리자 생성 잠금/완료 기록용 manager_bootstrap 운영 테이블을 생성한다. V4는 users.rejection_reason VARCHAR(500) NULL을 추가한다. 나머지 업무 테이블은 아직 없다.
 V1은 로컬 MySQL과 별도 Testcontainers MySQL에서 적용/재실행 검증을 완료했다.
 이후 ERD의 FK 의존 순서에 따라 기능 단위로 버전을 올린다.
-이미 적용된 V1/V2는 수정하지 않고 V3 이후 새 버전으로 변경한다.
+이미 적용된 V1~V3는 수정하지 않고 V4 이후 새 버전으로 변경한다.
 
 - Boot 관리 버전의 Flyway Starter + `flyway-mysql`을 사용한다.
 - 기본 경로: `classpath:db/migration`.

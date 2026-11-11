@@ -4,7 +4,7 @@
 
 **구현 범위(2026-11-10 코드 기준):** 17개 목표 엔티티 중 Store와 User 영속성을 구현했다.
 Store 조회/관리 Service/API를 구현했다. 모든 ACTIVE 사용자는 조회하고 MANAGER만 생성·이름 변경·비활성화한다. 목록은 활성 여부 필터와 페이지 조회, ID 오름차순 정렬을 제공한다. 이름 변경·비활성화는 대상 행 잠금으로 직렬화한다.
-User는 가입 대기 생성·역할/상태 enum·Repository까지 구현했다. 회원가입 API와 비밀번호 해시 처리를 구현했다. 승인·거절·비활성화 전이, AuthSession 및 나머지 업무 서비스는 설계 단계다.
+User는 가입 대기 생성·역할/상태 enum·Repository까지 구현했다. 회원가입 API와 비밀번호 해시 처리를 구현했다. 승인·거절 상태 전이와 관리자 심사 API를 구현했다. 사용자 비활성화 전이, AuthSession 및 나머지 업무 서비스는 설계 단계다.
 공통 패키지나 ErrorCode에 해당 기능의 이름이 있어도 기능 구현 완료를 의미하지 않는다.
 
 ## 1. 도메인 경계와 핵심 책임
@@ -23,7 +23,7 @@ User는 가입 대기 생성·역할/상태 enum·Repository까지 구현했다.
 
 ### User
 
-**현재 구현:** `createPending(email, passwordHash, name, now)`로 일반 가입을 생성하며 역할·소속·승인 정보를 외부 입력으로 받지 않는다. 이메일은 `strip()` 후 `Locale.ROOT`로 소문자화한다. 회원가입 DTO에서 이메일 형식과 비밀번호 8~72자·UTF-8 최대 72바이트를 검증하며, 가입 서비스에서 BCrypt 비용 12 해시를 생성한다. 비밀번호 공백은 제거하지 않는다. `homeStoreId`와 `approvedBy`는 ID 값으로 매핑하고 DB FK로 참조를 보호한다. 저장 시각은 Store와 동일한 UTC DATETIME(6)이다. 운영 전용 `createInitialManager`는 ACTIVE/MANAGER/소속 없음으로 생성한다. 초기 관리자의 approvedBy/approvedAt은 null이며 생성 근거는 manager_bootstrap에 기록한다. UserAuthorizationService는 ACTIVE 상태와 총괄/담당 매장 부매니저 권한을 검증한다. 일반 승인 상태 전이는 후속 작업이다.
+**현재 구현:** `createPending(email, passwordHash, name, now)`로 일반 가입을 생성하며 역할·소속·승인 정보를 외부 입력으로 받지 않는다. 이메일은 `strip()` 후 `Locale.ROOT`로 소문자화한다. 회원가입 DTO에서 이메일 형식과 비밀번호 8~72자·UTF-8 최대 72바이트를 검증하며, 가입 서비스에서 BCrypt 비용 12 해시를 생성한다. 비밀번호 공백은 제거하지 않는다. `homeStoreId`와 `approvedBy`는 ID 값으로 매핑하고 DB FK로 참조를 보호한다. 저장 시각은 Store와 동일한 UTC DATETIME(6)이다. 운영 전용 `createInitialManager`는 ACTIVE/MANAGER/소속 없음으로 생성한다. 초기 관리자의 approvedBy/approvedAt은 null이며 생성 근거는 manager_bootstrap에 기록한다. UserAuthorizationService는 ACTIVE 상태와 총괄/담당 매장 부매니저 권한을 검증한다. User.approve는 PENDING을 STAFF/ASSISTANT_MANAGER의 ACTIVE로 전환하고 소속/승인자/승인 시각을 기록한다. User.reject는 PENDING을 REJECTED로 전환하고 선택적 사유(최대 500자)를 저장한다. 승인·거절 재실행은 409로 거부한다.
 
 - 식별: `id`, 유일한 `email`, 비밀번호 해시.
 - 프로필: `name`, `role`, `status`, `homeStoreId`, 가입/승인/비활성화 시각.
@@ -32,6 +32,11 @@ User는 가입 대기 생성·역할/상태 enum·Repository까지 구현했다.
 - [확정] 총괄 승인 시 직원/부매니저의 `homeStoreId` 필수. MANAGER는 선택적.
 - [확정] 부매니저의 관리 대상 매장은 `homeStoreId`로 모델링한다. 한 매장에 여러 명이 배정될 수 있다.
 - [권장] 권한의 최신성 확인은 매 요청 시 DB 또는 무효화 가능한 인증 상태 검사로 보완한다. 계정 비활성화 후 기존 Access JWT만 믿어 계속 사용하게 하면 안 된다.
+
+### 가입 심사 구현
+
+UserReviewService는 ACTIVE MANAGER 인가 후 대상 User 행을 잠근다. 승인은 추가로 Store 행을 잠가 ACTIVE를 검사한다. 잠금 순서는 대상 User → 소속 Store이며 상태 전이와 저장은 같은 트랜잭션이다. 승인/승인 또는 승인/거절 경쟁에서 한 번만 성공한다. 승인 후 나중에 매장이 비활성화돼도 기존 사용자를 자동 변경하지 않는다.
+V4 rejectionReason은 선택적 거절 사유다. 거절자의 별도 감사 필드는 없고 거절 시각은 updatedAt에 기록한다. 심사 목록·응답은 비밀번호 해시를 제외한 DTO로 제공한다. 로그인/JWT·재심사·역할 변경/비활성화 API는 이번 범위가 아니다.
 
 ### Store
 

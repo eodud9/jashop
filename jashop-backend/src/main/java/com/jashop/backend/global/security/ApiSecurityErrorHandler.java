@@ -20,12 +20,12 @@ import org.springframework.security.web.access.AccessDeniedHandler;
 import org.springframework.security.web.csrf.CsrfException;
 import tools.jackson.databind.json.JsonMapper;
 
-/** Store API 필터 단계 오류도 MVC와 같은 응답 형식을 사용한다. */
-public class StoreSecurityErrorHandler implements AuthenticationEntryPoint, AccessDeniedHandler {
+/** 업무 API 필터 단계 오류도 MVC와 같은 응답 형식을 사용한다. */
+public class ApiSecurityErrorHandler implements AuthenticationEntryPoint, AccessDeniedHandler {
     private final JsonMapper json;
     private final Clock clock;
 
-    public StoreSecurityErrorHandler(JsonMapper json, Clock clock) {
+    public ApiSecurityErrorHandler(JsonMapper json, Clock clock) {
         this.json = json;
         this.clock = clock;
     }

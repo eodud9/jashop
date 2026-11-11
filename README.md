@@ -97,7 +97,7 @@ jashop/
 ```
 
 로컬 인프라는 루트 `compose.yml`, 백엔드 연결은 `application.yaml`에 구성되어 있습니다.
-Flyway V1은 `stores`, V2는 `users`, V3은 초기 관리자 생성 보호용 `manager_bootstrap`을 생성하며, 이후 DDL은 기능별로 추가합니다.
+Flyway V1은 `stores`, V2는 `users`, V3은 초기 관리자 생성 보호용 `manager_bootstrap`, V4는 users의 거절 사유 컬럼을 추가하며, 이후 DDL은 기능별로 추가합니다.
 기존 문서에 적힌 `backend/`, `frontend/` 대신 **현재 저장소의 실제 폴더명**을 기준으로 합니다.
 
 ## 로컬 실행
@@ -133,7 +133,7 @@ npm run dev
 회원가입 API로 총괄 권한을 취득할 수 없다. 최초 운영자만 별도의 비웹 부트스트랩으로 생성한다.
 기존 MANAGER가 있거나 생성 완료 기록이 있으면 재실행을 거부하며 기존 계정의 승격·비밀번호 재설정은 하지 않는다.
 
-1. 대상 DB와 DB_USERNAME/DB_PASSWORD를 확인한다. 이 명령은 대상 DB에 미적용 Flyway 마이그레이션(V3 포함)을 적용한다.
+1. 대상 DB와 DB_USERNAME/DB_PASSWORD를 확인한다. 이 명령은 대상 DB에 미적용 Flyway 마이그레이션(V4 포함)을 적용한다.
 2. `JASHOP_BOOTSTRAP_NAME`, `JASHOP_BOOTSTRAP_EMAIL`, `JASHOP_BOOTSTRAP_PASSWORD`를 실행 환경에 주입한다. 비밀번호는 회원가입과 동일하게 8~72자/UTF-8 최대 72바이트다. 비밀 관리 도구나 터미널의 숨김 입력을 사용하고 명령행 인자·소스·공유 로그에 비밀번호를 기록하지 않는다.
 3. 백엔드 디렉터리에서 다음을 실행한다. 부트스트랩은 기본 비활성이며 비웹 모드를 명시해야 한다.
 
@@ -175,8 +175,9 @@ JASHOP_BOOTSTRAP_ENABLED=true ./gradlew --no-daemon bootRun --args='--spring.mai
 - **완료(Phase 2-2B):** 공개 회원가입 API(`POST /api/v1/auth/signup`), DTO 검증, BCrypt 비밀번호 해시, 중복 이메일 409 처리. 가입자는 STAFF/PENDING/소속 없음으로 생성되며 토큰·세션은 발급하지 않습니다.
 - **완료(Phase 2-2C):** 운영 전용 초기 MANAGER 일회성 생성, DB 잠금/완료 기록, 계정 상태·총괄·담당 매장 부매니저 인가 서비스.
 - **완료(Phase 2-3):** Store 목록/상세/생성/이름 변경/비활성화 API, 페이지·활성 필터·ID 오름차순 정렬, 변경 행 잠금 및 인가 연결. 인증 principal 발급은 로그인/JWT 단계에서 구현합니다.
-- **최신 검증(2026-11-10):** 백엔드 `./gradlew test --offline` 전체 142건 통과(실패/오류/스킵 0). Store API 신규 43건 포함.
-- **진행 예정:** 관리자 승인·인증, 나머지 업무 DDL·API·통합 테스트, PWA 화면 및 Web Push 실기기 검증, CI/CD·AWS 배포.
+- **최신 검증(2026-11-10):** 백엔드 `./gradlew test --offline` 전체 190건 통과(실패/오류/스킵 0). 관리자 가입 심사 신규 48건 포함.
+- **완료(Phase 2-4):** 총괄 전용 승인 대기 목록·직원/부매니저 승인·거절 API, 대상 사용자/매장 행 잠금, 승인자·시각 및 선택적 거절 사유(V4) 저장.
+- **진행 예정:** 로그인·JWT·Refresh 인증, 나머지 업무 DDL·API·통합 테스트, PWA 화면 및 Web Push 실기기 검증, CI/CD·AWS 배포.
 - **MVP 제외:** POS 연동, 자동 재고 차감, 불량·유실, 급여 계산, 인력 자동 추천, AI 음성/자연어 검색.
 
 각 기능의 **확정 정책과 구현 제안은 [결정 기록](docs/06-decisions.md)에서 구분**합니다. 코드와 문서가 달라지면 변경 이유와 테스트 결과를 함께 업데이트합니다.

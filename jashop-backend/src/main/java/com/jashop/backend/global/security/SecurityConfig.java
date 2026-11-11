@@ -31,7 +31,7 @@ public class SecurityConfig {
     @Bean
     @Order(2)
     public SecurityFilterChain storeSecurityFilterChain(HttpSecurity http, JsonMapper json, Clock clock) throws Exception {
-        var errors = new StoreSecurityErrorHandler(json, clock);
+        var errors = new ApiSecurityErrorHandler(json, clock);
         http.securityMatcher("/api/v1/stores", "/api/v1/stores/**")
                 .authorizeHttpRequests(authorize -> authorize.anyRequest().authenticated())
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
@@ -42,6 +42,18 @@ public class SecurityConfig {
 
     @Bean
     @Order(3)
+    public SecurityFilterChain userReviewSecurityFilterChain(HttpSecurity http, JsonMapper json, Clock clock) throws Exception {
+        var errors = new ApiSecurityErrorHandler(json, clock);
+        http.securityMatcher("/api/v1/admin/users", "/api/v1/admin/users/**")
+                .authorizeHttpRequests(authorize -> authorize.anyRequest().authenticated())
+                .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+                .exceptionHandling(exceptions -> exceptions.authenticationEntryPoint(errors).accessDeniedHandler(errors));
+        // Store와 동일한 principal 계약을 사용하며 CSRF를 유지한다. 로그인/JWT는 후속 구현이다.
+        return http.build();
+    }
+
+    @Bean
+    @Order(4)
     public SecurityFilterChain defaultSecurityFilterChain(HttpSecurity http) throws Exception {
         // JWT 단계 전까지 기존 Boot 기본 인증 정책을 유지한다.
         http.authorizeHttpRequests(authorize -> authorize.anyRequest().authenticated())

@@ -51,7 +51,7 @@ MVC의 잘못된 JSON·누락/타입 오류·요청 Bean Validation은 `VALIDATI
 응답 형식 불일치는 `NOT_ACCEPTABLE`/406, 요청 Content-Type 오류는
 `UNSUPPORTED_MEDIA_TYPE`/415로 매핑한다. 기타 프레임워크 오류는 원래 HTTP 상태를 보존하면서
 4xx는 `REQUEST_FAILED`, 5xx는 `INTERNAL_SERVER_ERROR`(503은 `SERVICE_UNAVAILABLE`)로 반환한다.
-Store API의 Spring Security 필터 401/403은 공통 ApiError 형식으로 구현했다. 나머지 경로의 필터 응답 통합은 인증 구현 단계에서 처리한다.
+Store 및 관리자 가입 심사 API의 Spring Security 필터 401/403은 공통 ApiError 형식으로 구현했다. 나머지 경로의 필터 응답 통합은 인증 구현 단계에서 처리한다.
 
 - 페이지 조회는 기본 `page=0&size=20`, 최대 size=100 **[권장]**. 대량 알림/이력은 `cursor` 기반 페이지네이션을 선택할 수 있으며 실제 각 엔드포인트 계약을 구현 때 고정한다.
 - [권장] 생성·완료 명령의 네트워크 재시도는 `Idempotency-Key` 헤더 또는 요청 키 테이블/도메인 유일성으로 통제한다. **키 설계가 확정되지 않았으므로 자동으로 모두 멱등하다고 주장하지 않는다.**
@@ -67,7 +67,7 @@ Store API의 Spring Security 필터 401/403은 공통 ApiError 형식으로 구�
 
 ## 2. Auth · User · Store
 
-**구현 상태(2026-11-10):** Store/User 영속성, 공개 회원가입, 초기 관리자 생성, 인가 서비스 및 Store 조회·관리 API를 구현했다. 인증 사용자 계약은 연결했으나 로그인/JWT 제공자는 아직 없어 실제 계정의 HTTP 사용은 인증 단계 이후 가능하다. 나머지 User/Auth API와 현재 근무자 조회는 미구현이다.
+**구현 상태(2026-11-10):** Store/User 영속성, 공개 회원가입, 초기 관리자 생성, 인가 서비스 및 Store 조회·관리 API를 구현했다. 인증 사용자 계약은 연결했으나 로그인/JWT 제공자는 아직 없어 실제 계정의 HTTP 사용은 인증 단계 이후 가능하다. 승인 대기 목록·승인·거절 API도 구현했다. 로그인/JWT, 나머지 User 관리 API와 현재 근무자 조회는 미구현이다.
 
 ### 2.1 엔드포인트
 
@@ -124,7 +124,7 @@ Store API의 Spring Security 필터 401/403은 공통 ApiError 형식으로 구�
 - 사전 이메일 중복 검사와 DB `uk_users_email` UNIQUE 위반을 모두 409 `DUPLICATE_EMAIL`로 처리한다. 다른 DB 제약 오류를 이메일 중복으로 바꾸지 않는다.
 - 성공은 201과 위 6개 필드의 DTO만 반환한다. 비밀번호·해시·토큰을 반환하지 않고 로그인 세션도 만들지 않는다. 조회용 사용자 API가 아직 없으므로 Location 헤더는 생략한다.
 - 해시는 Spring Security DelegatingPasswordEncoder + BCrypt 비용 12를 사용해 `{bcrypt}` 접두사와 함께 저장한다. Salt는 매번 자동 생성된다.
-- 공개 보안 체인은 해당 POST 경로에만 매칭되고 STATELESS이며 해당 체인에서만 CSRF 검사를 제외한다. 다른 경로의 기존 기본 인증·CSRF 정책은 유지한다. JWT·계정 승인·Refresh·로그아웃 기능은 아직 없다.
+- 공개 보안 체인은 해당 POST 경로에만 매칭되고 STATELESS이며 해당 체인에서만 CSRF 검사를 제외한다. 다른 경로의 기존 기본 인증·CSRF 정책은 유지한다. 계정 승인·거절은 별도 관리자 API로 구현했다. JWT·Refresh·로그아웃 기능은 아직 없다.
 
 ### 2.3 승인 — POST `/admin/users/{id}/approve`
 
@@ -771,3 +771,40 @@ UserAuthorizationService는 ACTIVE 확인, 총괄 전용 명령, 담당 매장 �
 - StoreResponse는 id/code/name/active/createdAt/updatedAt의 6개 필드다. 양수가 아닌 ID·입력 오류는 VALIDATION_FAILED/400, 없는 매장은 STORE_NOT_FOUND/404, 중복 코드는 DUPLICATE_STORE_CODE/409다.
 - 생성 시 중복 사전 검사와 DB UNIQUE를 모두 사용해 동시 생성 충돌도 409로 처리한다. 기존 V1~V3 및 DB 스키마는 변경하지 않는다.
 - 이름 변경·비활성화는 서비스 트랜잭션에서 대상 Store를 PESSIMISTIC_WRITE(SELECT FOR UPDATE)로 읽고 변경한다. 같은 매장의 변경은 잠금 해제까지 기다리며 다른 매장 변경과 일반 조회는 계속 가능하다. 자동 재시도나 무기한 대기를 보장하지 않으며 잠금 대기 시간은 MySQL 설정을 따른다.
+
+
+## 관리자 가입 심사 API 구현 계약 (2026-11-10)
+
+### 공통 권한·응답
+
+- 세 API 모두 UserPrincipal로 식별한 ACTIVE MANAGER만 실행한다. 직원·부매니저는 담당 매장과 무관하게 거부한다. 인증 정보·역할·계정 상태는 기존 인가 서비스를 재사용하며 요청의 사용자 ID 헤더나 역할 주장으로 대체하지 않는다.
+- `/api/v1/admin/users/**` 전용 STATELESS 보안 체인은 Store와 같은 principal 계약과 CSRF 검사를 사용한다. 필터 오류는 공통 ApiSecurityErrorHandler로 반환한다. 로그인/JWT 제공자는 아직 없으므로 실제 계정으로 HTTP 로그인하는 기능은 이번 범위에 없다.
+- UserReviewResponse는 id/name/email/role/status/homeStoreId/approvedBy/approvedAt/rejectionReason/createdAt/updatedAt의 11개 필드다. 비밀번호·해시·토큰·세션을 반환하지 않는다.
+
+### GET `/admin/users/pending`
+
+PENDING만 조회한다. page=0, size=20 기본값, size=1~100, id ASC 고정 정렬이며 sort 파라미터로 바꾸지 않는다. JPA offset 한계 때문에 page×size가 Integer.MAX_VALUE를 넘으면 400이다. 응답은 `{content,page,size,totalElements,totalPages}`이며 범위를 벗어난 페이지는 빈 content로 반환한다.
+
+### POST `/admin/users/{id}/approve`
+
+- 필수 JSON은 `{role,homeStoreId}`다. role은 STAFF 또는 ASSISTANT_MANAGER만 허용하고 homeStoreId는 양수이며 실제 ACTIVE 매장이어야 한다. MANAGER 부여는 이 API에서 허용하지 않는다.
+- 요청의 approvedBy/approvedAt/status 등 추가 필드는 400으로 거부한다.
+- 대상 PENDING 사용자 행 → 소속 Store 행 순서로 PESSIMISTIC_WRITE 잠금을 얻는다. 사용자 상태와 매장 활성 상태를 검사한 뒤 같은 트랜잭션에서 ACTIVE 전환 및 역할/소속/승인자/승인 시각/updatedAt을 저장한다. 승인자는 인증된 총괄 ID, 시각은 서버 Clock이다.
+- 200 UserReviewResponse를 반환한다. 기존 이메일·이름·비밀번호 해시·createdAt은 보존한다.
+
+### POST `/admin/users/{id}/reject`
+
+- JSON `{reason?}` 또는 본문 생략을 허용한다. reason은 선택적 최대 500자이며 원문을 보존한다. 지정하지 않으면 null이다. 미허용 JSON 필드는 400이다.
+- 대상 User 행을 PESSIMISTIC_WRITE로 잠그고 PENDING인지 검사한 뒤 REJECTED/rejectionReason/updatedAt을 저장한다. 승인자·승인 시각·소속을 설정하지 않으며 역할/비밀번호 해시를 변경하지 않는다.
+- 거절 사유는 V4 users.rejection_reason에 저장한다. 별도 거절자/거절 시각 컬럼이나 심사 이력 테이블은 추가하지 않았다. 이번 흐름에서 거절 시각은 updatedAt이다.
+- 200 UserReviewResponse를 반환한다. 거절 계정의 재가입·재심사·재활성화는 이번 범위에 없다.
+
+### 오류·동시성
+
+- 입력/ID/허용되지 않은 승인 역할: VALIDATION_FAILED/400.
+- 없는 사용자: USER_NOT_FOUND/404, 없는 매장: STORE_NOT_FOUND/404.
+- 비활성 매장: STORE_INACTIVE/409.
+- PENDING이 아닌 사용자(이미 승인/거절/비활성 포함): USER_NOT_PENDING/409. 반복 요청은 기존 결과를 덮어쓰지 않는다.
+- 같은 사용자에 대한 승인/승인 및 승인/거절 경쟁은 단 한 요청만 200, 나머지는 상태 재검사 후 409다.
+- 승인 시 Store도 잠그므로 비활성화가 먼저 커밋하면 승인은 비활성 상태를 보고 거부한다. 승인이 먼저 커밋하면 이후 매장 비활성화는 가능하며 승인된 사용자를 자동 비활성화하거나 소속을 바꾸지 않는다.
+- 현재 잠금은 대상 사용자와 소속 매장에 적용한다. 요청자 권한 변경까지 직렬화하거나 잠금 오류를 자동 재시도하지는 않는다.

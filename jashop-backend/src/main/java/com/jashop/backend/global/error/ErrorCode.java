@@ -22,6 +22,8 @@ public enum ErrorCode {
     ACCOUNT_INACTIVE(HttpStatus.FORBIDDEN, "비활성 계정입니다."),
     STORE_ACCESS_DENIED(HttpStatus.FORBIDDEN, "해당 매장에 접근할 권한이 없습니다."),
     USER_NOT_FOUND(HttpStatus.NOT_FOUND, "사용자를 찾을 수 없습니다."),
+    USER_NOT_PENDING(HttpStatus.CONFLICT, "승인 대기 중인 사용자만 처리할 수 있습니다."),
+    STORE_INACTIVE(HttpStatus.CONFLICT, "비활성 매장에는 사용자를 배정할 수 없습니다."),
     STORE_NOT_FOUND(HttpStatus.NOT_FOUND, "매장을 찾을 수 없습니다."),
     DUPLICATE_STORE_CODE(HttpStatus.CONFLICT, "이미 사용 중인 매장 코드입니다."),
     WORK_SCHEDULE_NOT_FOUND(HttpStatus.NOT_FOUND, "근무 일정을 찾을 수 없습니다."),

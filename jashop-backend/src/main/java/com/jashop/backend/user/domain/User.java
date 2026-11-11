@@ -4,6 +4,8 @@ import java.time.Instant;
 import java.util.Locale;
 import java.util.Objects;
 
+import com.jashop.backend.global.error.BusinessException;
+import com.jashop.backend.global.error.ErrorCode;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -53,6 +55,9 @@ public class User {
     @Column(name = "approved_at", columnDefinition = "datetime(6)")
     private Instant approvedAt;
 
+    @Column(name = "rejection_reason", length = 500)
+    private String rejectionReason;
+
     @JdbcTypeCode(SqlTypes.TIMESTAMP)
     @Column(name = "created_at", nullable = false, updatable = false, columnDefinition = "datetime(6)")
     private Instant createdAt;
@@ -87,6 +92,38 @@ public class User {
         user.status = UserStatus.ACTIVE;
         // 최초 운영자에게 승인자는 없다. 생성 근거는 별도 bootstrap 기록으로 보존한다.
         return user;
+    }
+
+    public void requirePending() {
+        if (status != UserStatus.PENDING) {
+            throw new BusinessException(ErrorCode.USER_NOT_PENDING);
+        }
+    }
+
+    public void approve(UserRole role, Long homeStoreId, Long approvedBy, Instant now) {
+        requirePending();
+        if ((role != UserRole.STAFF && role != UserRole.ASSISTANT_MANAGER)
+                || homeStoreId == null || homeStoreId <= 0 || approvedBy == null || approvedBy <= 0) {
+            throw new BusinessException(ErrorCode.VALIDATION_FAILED);
+        }
+        Instant approvedAt = Objects.requireNonNull(now, "now");
+        this.role = role;
+        this.homeStoreId = homeStoreId;
+        this.approvedBy = approvedBy;
+        this.approvedAt = approvedAt;
+        this.updatedAt = approvedAt;
+        this.status = UserStatus.ACTIVE;
+    }
+
+    public void reject(String reason, Instant now) {
+        requirePending();
+        if (reason != null && reason.length() > 500) {
+            throw new BusinessException(ErrorCode.VALIDATION_FAILED);
+        }
+        Instant rejectedAt = Objects.requireNonNull(now, "now");
+        this.rejectionReason = reason;
+        this.updatedAt = rejectedAt;
+        this.status = UserStatus.REJECTED;
     }
 
     public static String normalizeEmail(String email) {
@@ -135,6 +172,10 @@ public class User {
 
     public Instant getApprovedAt() {
         return approvedAt;
+    }
+
+    public String getRejectionReason() {
+        return rejectionReason;
     }
 
     public Instant getCreatedAt() {

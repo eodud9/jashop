@@ -148,7 +148,7 @@ class StorePersistenceTests {
         } catch (java.sql.SQLException exception) {
             throw new AssertionError(exception);
         }
-        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("3");
+        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("4");
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM flyway_schema_history WHERE version = '1' AND success = 1",
                 Integer.class)).isEqualTo(1);
     }
@@ -209,6 +209,6 @@ class StorePersistenceTests {
         assertThat(validation.invalidMigrations).anySatisfy(migration ->
                 assertThat(migration.errorDetails.errorCode.toString()).isEqualTo("CHECKSUM_MISMATCH"));
         flyway.validate();
-        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("3");
+        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("4");
     }
 }

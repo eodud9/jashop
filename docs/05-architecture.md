@@ -2,7 +2,7 @@
 
 **설계 기준일:** 2026-11-05 · **구현 대조일:** 2026-11-10.
 **[현재]**는 저장소 코드로 확인한 구성, **[권장]**은 미적용 제안이다.
-공통 기반과 Store·User 영속성, 회원가입 API, 초기 MANAGER 생성·인가 서비스 및 Store 조회/관리 API까지 구현했으며, 아래 목표 아키텍처 전체가 구현된 것은 아니다.
+공통 기반과 Store·User 영속성, 회원가입 API, 초기 MANAGER 생성·인가 서비스 및 Store 조회/관리 및 관리자 가입 심사 API까지 구현했으며, 아래 목표 아키텍처 전체가 구현된 것은 아니다.
 로컬 기동 결과는 2026-11-07 기록이다. 2026-11-09 회원가입 구현 후 전체 테스트 79건을 통과했으며, 이는 기존 Compose DB 기동 검증과 별개다.
 
 ## 1. 현 저장소와 기술 환경
@@ -32,7 +32,7 @@ jashop/
 | Build | Gradle Wrapper `9.8.2`, Groovy DSL, `io.spring.dependency-management` `1.1.7` |
 | Spring | Actuator, Data JPA, Data Redis, Security, Validation, Web MVC |
 | Driver | `com.mysql:mysql-connector-j` |
-| Migration | Flyway Starter + `flyway-mysql`, V1 stores / V2 users / V3 manager_bootstrap |
+| Migration | Flyway Starter + `flyway-mysql`, V1 stores / V2 users / V3 manager_bootstrap / V4 rejection_reason |
 | Test | 분리된 Boot 4 Starter Test 모듈, JUnit Platform Launcher, Testcontainers MySQL |
 
 **실행 확인:** Java 21 / Spring Boot 4.1.2 / Gradle Wrapper 9.8.2에서 빌드·전체 테스트와
@@ -212,7 +212,7 @@ DB_USERNAME은 필요할 때 지정하며 기본값은 jashop이다. 현재 DB U
 - 이력 없는 비어 있지 않은 DB는 자동 baseline하지 않는다. 기존 스키마를 검토한 후 도입한다.
 - V2는 users를 추가하며 User는 ID 기반 매장/승인자 참조와 문자열 enum을 사용한다. `@JdbcTypeCode(VARCHAR)`로 MySQL native ENUM 대신 ERD의 VARCHAR 매핑을 유지한다.
 - 회원가입은 `auth.api` DTO/Controller → `auth.application.SignupService` → `UserRepository`로 구성한다. 서비스 트랜잭션에서 BCrypt 해시와 Clock 시각을 사용하며 saveAndFlush로 동시 중복 예외를 변환한다.
-- 초기 MANAGER 생성은 auth.bootstrap, 인가 서비스는 user.application에 구현했다. Store API/Service는 인가 서비스와 연결했으며 승인·로그인·JWT는 미구현이다.
+- 초기 MANAGER 생성은 auth.bootstrap, 인가 서비스는 user.application에 구현했다. Store API/Service와 관리자 가입 심사 API는 인가 서비스와 연결했으며 로그인·JWT는 미구현이다.
 
 ### 5.2 테스트와 검증 기록
 
@@ -266,7 +266,7 @@ cd jashop-backend
 ## 6. 인증·인가 전략 [회원가입·부트스트랩·인가 서비스 구현]
 
 **현재:** `PasswordConfig`는 DelegatingPasswordEncoder + BCrypt(12)를 제공한다. 기존 Security 의존성만 사용하며 새 라이브러리는 추가하지 않았다. 비밀번호 원문과 해시는 응답·DTO 문자열 표현에 노출하지 않는다.
-`SecurityConfig`는 가입 POST 전용 STATELESS 공개 체인, Store 전용 STATELESS 체인, 나머지 기본 인증 체인을 순서대로 분리한다. Store 체인은 CSRF를 유지하며 Basic/Form 인증을 제공하지 않는다. CSRF 제외는 가입 체인에만 적용하며, 나머지는 기존 Boot의 기본 인증·CSRF 정책을 유지한다. 이 기본 인증은 User 로그인 구현이 아니며 초기 MANAGER 부트스트랩을 대체하지 않는다. JWT 구현 단계에서 기본 인증 체인을 교체한다.
+`SecurityConfig`는 가입 POST 전용 STATELESS 공개 체인, Store 전용 STATELESS 체인, 관리자 User 전용 STATELESS 체인, 나머지 기본 인증 체인을 순서대로 분리한다. Store 체인은 CSRF를 유지하며 Basic/Form 인증을 제공하지 않는다. CSRF 제외는 가입 체인에만 적용하며, 나머지는 기존 Boot의 기본 인증·CSRF 정책을 유지한다. 이 기본 인증은 User 로그인 구현이 아니며 초기 MANAGER 부트스트랩을 대체하지 않는다. JWT 구현 단계에서 기본 인증 체인을 교체한다.
 
 비밀번호 길이 검증은 BCrypt의 72바이트 한계에서 조용한 잘림/런타임 오류를 방지한다. 비용 12의 운영 응답 시간과 부하는 배포 환경에서 별도로 측정한다.
 
@@ -387,5 +387,15 @@ Spring Security 기반의 계정 상태·역할 인가는 구현했지만 JWT �
 - UserPrincipal은 인증된 사용자 ID만 담으며 역할/상태는 DB에서 확인한다. 요청 본문·임의 헤더로 principal을 생성하는 기능은 없다. 인증 완료 여부와 principal 타입을 검사하므로 Boot 기본 로그인 사용자도 Store 사용자로 간주하지 않는다.
 - 목록은 findByActive와 PageRequest로 필터·페이지·ID ASC를 DB에서 처리하며 응답은 명시적 StorePageResponse로 고정한다. 상세는 활성 여부와 무관하게 조회한다.
 - 이름 변경/비활성화는 동일 트랜잭션에서 findByIdForUpdate(PESSIMISTIC_WRITE)로 로드하고 dirty checking으로 저장한다. 변경 전 최신 행을 잠가 읽어 비활성 상태가 이름 변경으로 덮어써지는 것을 방지한다. 잠금은 Store 행에 대한 것으로 계정 권한 변경까지 직렬화하지는 않는다.
-- StoreSecurityErrorHandler는 Store 필터의 인증/접근 거부를 공통 ApiError(JSON, Clock, 서버 traceId)로 반환한다. 다른 경로의 기존 인증/CSRF 정책은 유지한다.
+- ApiSecurityErrorHandler는 Store 필터의 인증/접근 거부를 공통 ApiError(JSON, Clock, 서버 traceId)로 반환한다. 다른 경로의 기존 인증/CSRF 정책은 유지한다.
 - 아직 로그인/JWT 제공자가 없어 실제 계정으로 HTTP 호출할 수 없다. Store API 통합 테스트는 테스트 인증 객체를 주입하고 운영 필터와 실제 MySQL을 사용한다. 새 라이브러리·마이그레이션은 추가하지 않는다.
+
+
+## 관리자 가입 심사 구현 상세 (2026-11-10)
+
+- user.api.UserReviewController/DTO → user.application.UserReviewService → UserRepository/StoreRepository 및 User 도메인 메서드로 구성한다. 기존 UserPrincipal/인가 서비스를 사용한다.
+- pending은 readOnly 트랜잭션, approve/reject는 쓰기 트랜잭션이다. 상태 전이 규칙은 User.requirePending/approve/reject에도 두어 서비스 밖에서도 잘못된 재심사를 막는다.
+- 승인 잠금 순서는 대상 User(PESSIMISTIC_WRITE) → Store(PESSIMISTIC_WRITE), 거절은 대상 User만 잠근다. Store 관리 명령은 기존 Store 잠금 규칙을 유지한다. 현재 구현에 Store → 대상 User 잠금을 획득하는 역순 경로는 없다.
+- Store 잠금은 승인 시 ACTIVE 검사와 승인 저장 사이의 비활성화 경쟁을 방지한다. 이후 비활성화까지 금지하는 정책은 아니다. 요청자 권한 변경과의 경쟁, DB 잠금 timeout/자동 재시도는 별도 후속 과제다.
+- 선택적 거절 사유를 보존하기 위해 V4를 추가하며 기존 V1~V3는 변경하지 않는다. rejection_reason은 nullable VARCHAR(500), 기존 데이터는 null로 보존된다. 로그인/JWT나 알림 기능은 추가하지 않는다.
+- 기존 StoreSecurityErrorHandler를 ApiSecurityErrorHandler로 이름 변경해 Store/관리자 User 필터에서 재사용한다. 두 보호 체인은 Basic/Form 인증을 제공하지 않고 CSRF를 유지한다. 나머지 기본 체인과 회원가입의 공개 범위는 유지한다.

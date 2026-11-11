@@ -5,6 +5,7 @@
 - 실제 구현 전 Flyway DDL을 작성하고 MySQL Testcontainers로 검증한다. **이 문서 자체가 이미 실행된 마이그레이션은 아니다.**
 
 **구현 상태(2026-11-09):** V1 `stores`와 V2 `users`를 구현했다. 나머지 15개 업무 테이블은 미구현이다. V2는 별도 Testcontainers MySQL에서 검증하며 기존 로컬 DB에 자동 적용하지 않는다.
+V4는 users의 선택적 거절 사유 컬럼(rejection_reason)을 추가한다. 기존 사용자 행은 유지한다.
 V3 `manager_bootstrap` 운영 테이블을 추가했다(2026-11-10). `id TINYINT PK CHECK(id=1)`, `user_id BIGINT NULL FK users(id)`, `completed_at DATETIME(6) NULL`이며 사용자/완료 시각은 둘 다 NULL 또는 둘 다 NOT NULL이다. 초기 id=1 행을 생성하고 FOR UPDATE로 잠근 뒤 사용자 생성과 완료 기록을 한 트랜잭션으로 커밋한다. 완료 기록은 관리자 비활성화 후에도 보존한다.
 목표 테이블은 업무 17개 + 운영 1개다. Flyway 이력 테이블은 이와 별개의 도구 관리 테이블이다.
 
@@ -262,7 +263,7 @@ Java의 생성/수정 시각은 `Instant`, JDBC는 UTC로 해석하는 TIMESTAMP
 
 ### 02. `users` — 계정·권한·기본 소속
 
-구현: `V2__create_users.sql`, InnoDB / utf8mb4 / utf8mb4_0900_ai_ci. 이메일 UNIQUE, 매장/승인자 FK(자동 연쇄 삭제 없음), 역할·상태 CHECK 및 ACTIVE 직원/부매니저의 소속 필수 CHECK를 적용했다. `(status, home_store_id, role)` 인덱스를 둔다. enum은 VARCHAR 문자열로 저장한다. 이메일 비교는 DB collation도 따르며 이메일 정규화와 동일한 의미의 이진 비교는 아니다. 승인자의 MANAGER 여부와 매장 활성 여부는 FK만으로 보장하지 않으며 후속 서비스에서 검증한다.
+구현: `V2__create_users.sql`, InnoDB / utf8mb4 / utf8mb4_0900_ai_ci. 이메일 UNIQUE, 매장/승인자 FK(자동 연쇄 삭제 없음), 역할·상태 CHECK 및 ACTIVE 직원/부매니저의 소속 필수 CHECK를 적용했다. `(status, home_store_id, role)` 인덱스를 둔다. enum은 VARCHAR 문자열로 저장한다. 이메일 비교는 DB collation도 따르며 이메일 정규화와 동일한 의미의 이진 비교는 아니다. 승인자의 MANAGER 여부와 매장 활성 여부는 FK만으로 보장하지 않는다. UserReviewService가 요청자의 ACTIVE/MANAGER와 잠근 대상 User의 PENDING, 잠근 Store의 ACTIVE를 검사한다. V4는 기존 행을 유지하며 nullable rejection_reason VARCHAR(500)을 추가한다.
 
 | 컬럼 | MySQL 타입(권장) | 제약 | 의미 |
 |---|---|---|---|
@@ -275,6 +276,7 @@ Java의 생성/수정 시각은 `Instant`, JDBC는 UTC로 해석하는 TIMESTAMP
 | `home_store_id` | `BIGINT` | NULL FK→stores.id | 총괄 승인 시 지정한 기본 소속 |
 | `approved_by` | `BIGINT` | NULL FK→users.id | 가입 승인한 매니저 |
 | `approved_at` | `DATETIME(6)` | NULL | 승인 시각 |
+| `rejection_reason` | `VARCHAR(500)` | NULL | 가입 거절 사유(V4), 미입력은 null |
 | `created_at` | `DATETIME(6)` | NOT NULL | 가입 시각 |
 | `updated_at` | `DATETIME(6)` | NOT NULL | 수정 시각 |
 
