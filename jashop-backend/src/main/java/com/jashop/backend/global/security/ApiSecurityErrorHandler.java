@@ -18,6 +18,7 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.web.AuthenticationEntryPoint;
 import org.springframework.security.web.access.AccessDeniedHandler;
 import org.springframework.security.web.csrf.CsrfException;
+import org.springframework.security.oauth2.jwt.JwtValidationException;
 import tools.jackson.databind.json.JsonMapper;
 
 /** 업무 API 필터 단계 오류도 MVC와 같은 응답 형식을 사용한다. */
@@ -33,6 +34,13 @@ public class ApiSecurityErrorHandler implements AuthenticationEntryPoint, Access
     @Override
     public void commence(HttpServletRequest request, HttpServletResponse response,
             AuthenticationException exception) throws IOException {
+        for (Throwable cause = exception; cause != null; cause = cause.getCause()) {
+            if (cause instanceof JwtValidationException invalid
+                    && invalid.getErrors().stream().anyMatch(error -> "token_expired".equals(error.getErrorCode()))) {
+                write(response, ErrorCode.TOKEN_EXPIRED);
+                return;
+            }
+        }
         write(response, ErrorCode.UNAUTHENTICATED);
     }
 
@@ -52,6 +60,7 @@ public class ApiSecurityErrorHandler implements AuthenticationEntryPoint, Access
             traceId = UUID.randomUUID().toString();
         }
         response.setStatus(code.getStatus().value());
+        if (code.getStatus().value() == 401) response.setHeader("WWW-Authenticate", "Bearer");
         response.setContentType(MediaType.APPLICATION_JSON_VALUE);
         json.writeValue(response.getOutputStream(), new ApiError(code.name(), code.getMessage(),
                 Instant.now(clock), traceId, List.of()));

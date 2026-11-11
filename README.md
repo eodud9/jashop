@@ -143,7 +143,31 @@ JASHOP_BOOTSTRAP_ENABLED=true ./gradlew --no-daemon bootRun --args='--spring.mai
 
 성공 시 `ACTIVE/MANAGER` 계정과 생성 완료 기록을 같은 트랜잭션으로 저장한다. 기본 소속 매장과 승인자/승인 시각은 없고 완료 기록의 user_id/completed_at이 운영자 생성 근거다. 완료 기록을 지우거나 기존 계정을 자동 변경하지 않는다. 실행 후 부트스트랩 환경변수, 특히 비밀번호를 실행 환경에서 제거한다. 웹 서버는 일반 실행 환경으로 별도 기동한다.
 
-현재 로그인/JWT는 미구현이므로 생성된 관리자 계정으로 웹 로그인을 할 수는 없다. 이번 구현에서는 기존 Compose DB에 마이그레이션을 적용하거나 실제 관리자 계정을 생성하지 않았다.
+생성된 ACTIVE 관리자 계정은 JWT 설정 후 로그인 API로 인증할 수 있다. 비웹 관리자 생성에는 JWT 키가 필요하지 않다. 이번 구현에서는 기존 Compose DB에 마이그레이션을 적용하거나 실제 관리자 계정을 생성하지 않았다.
+
+## 로그인과 Access JWT 실행
+
+웹 서버 실행 시 `JASHOP_JWT_SECRET_BASE64`를 Spring 실행 환경에 주입해야 합니다. Base64 디코딩 결과가 32바이트 미만이거나 잘못된 형식이면 기동을 거부하며, 기본 키는 제공하지 않습니다. 예를 들어 현재 셸에서 키를 생성할 수 있습니다.
+
+```bash
+export JASHOP_JWT_SECRET_BASE64="$(openssl rand -base64 32)"
+# 기존 DB_USERNAME/DB_PASSWORD 설정 후 jashop-backend 디렉터리에서 실행
+./gradlew bootRun
+```
+
+키 원문을 Git·공유 로그에 저장하지 않습니다. 재시작 후 기존 토큰을 유지하려면 동일한 키를 안전하게 재주입해야 하며 키를 바꾸면 기존 토큰의 서명 검증이 실패합니다. Compose의 .env는 Spring에 자동 전달되지 않습니다. 비웹 초기 관리자 생성에는 이 키가 필요하지 않습니다.
+
+| Spring 실행 환경변수 | 기본값 / 규칙 |
+|---|---|
+| JASHOP_JWT_SECRET_BASE64 | 필수, 무작위 32바이트 이상을 Base64 인코딩 |
+| JASHOP_JWT_ISSUER | https://jashop.local (토큰 발급자 식별값, 외부 서버 조회 없음) |
+| JASHOP_JWT_AUDIENCE | jashop-api |
+| JASHOP_JWT_ACCESS_TTL_SECONDS | 900, 설정 범위 1~86400초 |
+| JASHOP_SECURITY_ALLOWED_ORIGINS | http://localhost:5173, 여러 origin은 쉼표로 구분 |
+
+`POST /api/v1/auth/login`에 `{email,password}` JSON을 보내면 `{accessToken,tokenType,expiresIn,user}`를 반환합니다. ACTIVE 계정만 로그인할 수 있으며 로그인 성공 응답은 no-store, 인증 쿠키·서버 세션을 발급하지 않습니다. 토큰을 얻은 후 `Authorization: Bearer {accessToken}` 헤더로 `GET /api/v1/users/me`, Store·가입 심사 API를 호출합니다. 비밀번호·토큰을 명령행 인자나 공유 파일에 남기지 않습니다.
+
+현재 구현된 Bearer 업무 API는 CSRF 토큰을 요구하지 않으며 쿠키·Basic·기존 세션으로 인증하지 않습니다. Refresh·로그아웃은 아직 없고 Access가 만료되면 다시 로그인합니다. 로그인 실패 횟수 제한·키 순환/폐기 관리·프론트엔드 로그인 화면은 이번 범위에 없습니다. 토큰은 개인 정보 암호화 수단이 아니므로 사용자 ID와 검증용 claim만 담습니다.
 
 ## 문서
 
@@ -174,10 +198,11 @@ JASHOP_BOOTSTRAP_ENABLED=true ./gradlew --no-daemon bootRun --args='--spring.mai
 - **완료(Phase 2-2A):** User 엔티티·역할/상태 enum·Repository, V2 users 마이그레이션, 이메일 정규화 및 MySQL 제약 검증. 로컬 운영 DB에 V2를 적용한 것은 아닙니다.
 - **완료(Phase 2-2B):** 공개 회원가입 API(`POST /api/v1/auth/signup`), DTO 검증, BCrypt 비밀번호 해시, 중복 이메일 409 처리. 가입자는 STAFF/PENDING/소속 없음으로 생성되며 토큰·세션은 발급하지 않습니다.
 - **완료(Phase 2-2C):** 운영 전용 초기 MANAGER 일회성 생성, DB 잠금/완료 기록, 계정 상태·총괄·담당 매장 부매니저 인가 서비스.
-- **완료(Phase 2-3):** Store 목록/상세/생성/이름 변경/비활성화 API, 페이지·활성 필터·ID 오름차순 정렬, 변경 행 잠금 및 인가 연결. 인증 principal 발급은 로그인/JWT 단계에서 구현합니다.
-- **최신 검증(2026-11-10):** 백엔드 `./gradlew test --offline` 전체 190건 통과(실패/오류/스킵 0). 관리자 가입 심사 신규 48건 포함.
+- **완료(Phase 2-3):** Store 목록/상세/생성/이름 변경/비활성화 API, 페이지·활성 필터·ID 오름차순 정렬, 변경 행 잠금 및 인가 연결. 인증 principal 발급은 Phase 3-1의 Access JWT 인증으로 연결했습니다.
+- **최신 검증(2026-11-11):** 백엔드 `./gradlew test --offline` 전체 237건 통과(실패/오류/스킵 0). 로그인/JWT 신규 47건 포함.
 - **완료(Phase 2-4):** 총괄 전용 승인 대기 목록·직원/부매니저 승인·거절 API, 대상 사용자/매장 행 잠금, 승인자·시각 및 선택적 거절 사유(V4) 저장.
-- **진행 예정:** 로그인·JWT·Refresh 인증, 나머지 업무 DDL·API·통합 테스트, PWA 화면 및 Web Push 실기기 검증, CI/CD·AWS 배포.
+- **완료(Phase 3-1):** 이메일/비밀번호 로그인, Access JWT 발급·검증, 내 정보 조회 및 기존 업무 API Bearer 인증 연결.
+- **진행 예정:** Refresh·로그아웃/AuthSession, 나머지 업무 DDL·API·통합 테스트, PWA 화면 및 Web Push 실기기 검증, CI/CD·AWS 배포.
 - **MVP 제외:** POS 연동, 자동 재고 차감, 불량·유실, 급여 계산, 인력 자동 추천, AI 음성/자연어 검색.
 
 각 기능의 **확정 정책과 구현 제안은 [결정 기록](docs/06-decisions.md)에서 구분**합니다. 코드와 문서가 달라지면 변경 이유와 테스트 결과를 함께 업데이트합니다.

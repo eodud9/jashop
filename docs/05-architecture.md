@@ -1,8 +1,8 @@
 # 05. 기술 아키텍처 및 개발 환경
 
-**설계 기준일:** 2026-11-05 · **구현 대조일:** 2026-11-10.
+**설계 기준일:** 2026-11-05 · **구현 대조일:** 2026-11-11.
 **[현재]**는 저장소 코드로 확인한 구성, **[권장]**은 미적용 제안이다.
-공통 기반과 Store·User 영속성, 회원가입 API, 초기 MANAGER 생성·인가 서비스 및 Store 조회/관리 및 관리자 가입 심사 API까지 구현했으며, 아래 목표 아키텍처 전체가 구현된 것은 아니다.
+공통 기반과 Store·User 영속성, 회원가입 API, 초기 MANAGER 생성·인가 서비스 및 Store 조회/관리 및 관리자 가입 심사 API 및 로그인·Access JWT까지 구현했으며, 아래 목표 아키텍처 전체가 구현된 것은 아니다.
 로컬 기동 결과는 2026-11-07 기록이다. 2026-11-09 회원가입 구현 후 전체 테스트 79건을 통과했으며, 이는 기존 Compose DB 기동 검증과 별개다.
 
 ## 1. 현 저장소와 기술 환경
@@ -212,7 +212,7 @@ DB_USERNAME은 필요할 때 지정하며 기본값은 jashop이다. 현재 DB U
 - 이력 없는 비어 있지 않은 DB는 자동 baseline하지 않는다. 기존 스키마를 검토한 후 도입한다.
 - V2는 users를 추가하며 User는 ID 기반 매장/승인자 참조와 문자열 enum을 사용한다. `@JdbcTypeCode(VARCHAR)`로 MySQL native ENUM 대신 ERD의 VARCHAR 매핑을 유지한다.
 - 회원가입은 `auth.api` DTO/Controller → `auth.application.SignupService` → `UserRepository`로 구성한다. 서비스 트랜잭션에서 BCrypt 해시와 Clock 시각을 사용하며 saveAndFlush로 동시 중복 예외를 변환한다.
-- 초기 MANAGER 생성은 auth.bootstrap, 인가 서비스는 user.application에 구현했다. Store API/Service와 관리자 가입 심사 API는 인가 서비스와 연결했으며 로그인·JWT는 미구현이다.
+- 초기 MANAGER 생성은 auth.bootstrap, 인가 서비스는 user.application에 구현했다. Store API/Service와 관리자 가입 심사 API는 인가 서비스와 연결했으며 로그인·Access JWT는 3-1로 구현했으며 Refresh/로그아웃은 미구현이다.
 
 ### 5.2 테스트와 검증 기록
 
@@ -375,7 +375,7 @@ sequenceDiagram
 - [ ] 일반 웹 모드의 HTTP 및 실제 인증·인가 동작 검증.
 - [ ] Redis 연결/기능 통합 테스트.
 
-Spring Security 기반의 계정 상태·역할 인가는 구현했지만 JWT 검증 및 DB 사용자의 로그인 자격 증명 검증은 미구현이다.
+Spring Security 기반 로그인/Access JWT 검증 및 DB 계정 상태·역할 인가를 구현했다. Refresh/AuthSession은 후속 단계다.
 전체 API를 permitAll로 열지 않고, 각 업무 API 도입 시 보안 필터와 권한 검증을 함께 구현한다.
 
 [테스트와 단계별 구현 계획](07-development-plan.md)에 따라 확장한다.
@@ -399,3 +399,17 @@ Spring Security 기반의 계정 상태·역할 인가는 구현했지만 JWT �
 - Store 잠금은 승인 시 ACTIVE 검사와 승인 저장 사이의 비활성화 경쟁을 방지한다. 이후 비활성화까지 금지하는 정책은 아니다. 요청자 권한 변경과의 경쟁, DB 잠금 timeout/자동 재시도는 별도 후속 과제다.
 - 선택적 거절 사유를 보존하기 위해 V4를 추가하며 기존 V1~V3는 변경하지 않는다. rejection_reason은 nullable VARCHAR(500), 기존 데이터는 null로 보존된다. 로그인/JWT나 알림 기능은 추가하지 않는다.
 - 기존 StoreSecurityErrorHandler를 ApiSecurityErrorHandler로 이름 변경해 Store/관리자 User 필터에서 재사용한다. 두 보호 체인은 Basic/Form 인증을 제공하지 않고 CSRF를 유지한다. 나머지 기본 체인과 회원가입의 공개 범위는 유지한다.
+
+
+## 로그인 및 Access JWT 구현 상세 (2026-11-11)
+
+- 기존 4개 체인을 공개 가입/로그인 POST 체인과 나머지 Bearer 체인 2개로 교체했다. 모두 STATELESS이며 Basic/Form 로그인과 기본 logout 필터를 사용하지 않는다. 업무 경로는 쿠키/HttpSession 인증을 사용하지 않아 Store/관리자 User/내 정보의 CSRF 요구를 제거했다. 미래 Refresh 쿠키 경로를 포함해 CSRF를 전역 해제하지 않는다.
+- auth.api LoginController/DTO → auth.application.LoginService → 기존 PasswordEncoder/UserRepository/인가 및 auth.token.AccessTokenService 구조다. BCrypt 검증 후 ACTIVE를 확인하고 JwtEncoder로 서명한다. 로그인 실패 시 사용자 존재와 비밀번호 오류는 같은 401이며 없는 사용자도 비교용 BCrypt 해시를 사용한다.
+- JWT 지원에 필요한 spring-security-oauth2-resource-server 및 spring-security-oauth2-jose 두 의존성만 추가하고 버전은 기존 Boot BOM에 맡긴다. 수동 JWT 파싱·암호화 구현 대신 표준 Bearer 필터와 Nimbus 검증을 사용한다. 공식 근거: https://docs.spring.io/spring-security/reference/servlet/oauth2/resource-server/jwt.html
+- JwtConfig는 Servlet 환경에서만 등록한다. 외부 Base64 키를 고정 메시지로 검사하고 누락/형식 오류/32바이트 미만이면 웹 기동을 거부한다. 발급과 검증 모두 HS256을 사용하고 원격 issuer/JWK discovery는 하지 않는다. 설정 객체에 키를 보관하거나 키를 포함하는 record/toString을 만들지 않는다.
+- AccessJwtValidator가 Clock 기준 iss/aud/sub/token_use/iat/exp/nbf를 검사하고 만료 유예는 0초다. 실제 토큰은 HS256 서명, JWT typ, 사용자 ID와 검증 claim만 담는다. 토큰을 역할 정보의 진실 원천으로 사용하지 않는다.
+- Bearer 검증 후 UserPrincipal만 생성하며 토큰 원문을 Authentication credentials에 남기지 않는다. 기존 서비스가 DB의 ACTIVE/역할을 확인한다. 사용자 권한 변경과 진행 중인 업무를 직렬화하는 잠금까지 추가한 것은 아니다.
+- CORS는 origin 설정 목록, Authorization/Content-Type, GET/POST/PATCH/OPTIONS만 허용하며 credentials=false다. 기본 origin은 Vite의 http://localhost:5173이고 운영에서는 명시적 설정이 필요하다.
+- Access TTL 기본 900초(허용 설정 1~86400초), issuer 기본 https://jashop.local, audience jashop-api다. 환경변수 및 실행 절차는 README를 따른다. 키 재주입/순환은 운영자의 책임이며 재시작 시 임의의 기본 키를 생성하지 않는다. 테스트만 프로세스별 무작위 키를 생성한다.
+- CurrentUserController는 검증된 principal로 기존 인가 서비스를 호출하고 자격 증명을 제외한 내 정보 DTO를 반환한다. 로그인/내 정보 응답은 no-store이며 인증 쿠키·서버 세션을 생성하지 않는다.
+- Refresh/AuthSession/로그아웃·세션별 Access 폐기·로그인 실패 제한·프론트 화면은 이번 범위에 없다. Access 만료 후 재로그인한다. 기존 V1~V4 및 Compose DB/볼륨은 변경하지 않는다.

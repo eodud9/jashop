@@ -67,7 +67,7 @@ Store 및 관리자 가입 심사 API의 Spring Security 필터 401/403은 공�
 
 ## 2. Auth · User · Store
 
-**구현 상태(2026-11-10):** Store/User 영속성, 공개 회원가입, 초기 관리자 생성, 인가 서비스 및 Store 조회·관리 API를 구현했다. 인증 사용자 계약은 연결했으나 로그인/JWT 제공자는 아직 없어 실제 계정의 HTTP 사용은 인증 단계 이후 가능하다. 승인 대기 목록·승인·거절 API도 구현했다. 로그인/JWT, 나머지 User 관리 API와 현재 근무자 조회는 미구현이다.
+**구현 상태(2026-11-10):** Store/User 영속성, 공개 회원가입, 초기 관리자 생성, 인가 서비스 및 Store 조회·관리 API를 구현했다. 인증 사용자 계약은 실제 Access JWT 검증으로 연결했다. 승인 대기 목록·승인·거절 API도 구현했다. 로그인·Access JWT·내 정보 조회를 구현했다(2026-11-11). Refresh/로그아웃, 나머지 User 관리 API와 현재 근무자 조회는 미구현이다.
 
 ### 2.1 엔드포인트
 
@@ -124,7 +124,7 @@ Store 및 관리자 가입 심사 API의 Spring Security 필터 401/403은 공�
 - 사전 이메일 중복 검사와 DB `uk_users_email` UNIQUE 위반을 모두 409 `DUPLICATE_EMAIL`로 처리한다. 다른 DB 제약 오류를 이메일 중복으로 바꾸지 않는다.
 - 성공은 201과 위 6개 필드의 DTO만 반환한다. 비밀번호·해시·토큰을 반환하지 않고 로그인 세션도 만들지 않는다. 조회용 사용자 API가 아직 없으므로 Location 헤더는 생략한다.
 - 해시는 Spring Security DelegatingPasswordEncoder + BCrypt 비용 12를 사용해 `{bcrypt}` 접두사와 함께 저장한다. Salt는 매번 자동 생성된다.
-- 공개 보안 체인은 해당 POST 경로에만 매칭되고 STATELESS이며 해당 체인에서만 CSRF 검사를 제외한다. 다른 경로의 기존 기본 인증·CSRF 정책은 유지한다. 계정 승인·거절은 별도 관리자 API로 구현했다. JWT·Refresh·로그아웃 기능은 아직 없다.
+- 공개 보안 체인은 해당 POST 경로에만 매칭되고 STATELESS이며 해당 체인에서만 CSRF 검사를 제외한다. 다른 경로의 기존 기본 인증·CSRF 정책은 유지한다. 계정 승인·거절은 별도 관리자 API로 구현했다. 로그인·Access JWT는 3-1에서 구현했으며 Refresh·로그아웃은 아직 없다.
 
 ### 2.3 승인 — POST `/admin/users/{id}/approve`
 
@@ -808,3 +808,33 @@ PENDING만 조회한다. page=0, size=20 기본값, size=1~100, id ASC 고정 �
 - 같은 사용자에 대한 승인/승인 및 승인/거절 경쟁은 단 한 요청만 200, 나머지는 상태 재검사 후 409다.
 - 승인 시 Store도 잠그므로 비활성화가 먼저 커밋하면 승인은 비활성 상태를 보고 거부한다. 승인이 먼저 커밋하면 이후 매장 비활성화는 가능하며 승인된 사용자를 자동 비활성화하거나 소속을 바꾸지 않는다.
 - 현재 잠금은 대상 사용자와 소속 매장에 적용한다. 요청자 권한 변경까지 직렬화하거나 잠금 오류를 자동 재시도하지는 않는다.
+
+
+## 로그인·Access JWT 구현 계약 (2026-11-11, Phase 3-1)
+
+이 절은 이전 Store/가입 심사 절의 임시 인증 및 CSRF 설명을 대체한다. 기존 DTO·권한·행 잠금 규칙은 유지한다.
+
+### POST `/api/v1/auth/login`
+
+- 공개 JSON POST이며 CSRF를 검사하지 않는다. 필드는 email/password만 허용한다. 이메일은 strip/Locale.ROOT 소문자 정규화 후 필수·형식·최대 254자, 비밀번호는 필수·최대 72자이면서 UTF-8 최대 72바이트로 검증한다. 비밀번호 공백을 제거하지 않는다.
+- 없는 이메일과 잘못된 비밀번호는 동일 INVALID_CREDENTIALS/401이다. 없는 사용자도 비교용 BCrypt 해시로 검증 작업을 수행하지만 모든 요청의 동일 실행 시간을 보장하는 것은 아니다.
+- 비밀번호 일치 후 PENDING/REJECTED/INACTIVE는 해당 ACCOUNT_*/403, ACTIVE만 토큰을 발급한다. 잘못된 비밀번호로 계정 상태를 조회할 수 없다.
+- 200 `{accessToken,tokenType:"Bearer",expiresIn,user}`. user는 id/name/email/role/status/homeStoreId의 6개 필드다. 비밀번호·해시·Refresh를 반환하지 않고 인증 쿠키·서버 세션을 생성하지 않는다. 응답은 Cache-Control: no-store 및 Pragma: no-cache다.
+
+### Access 검증 및 업무 API
+
+- Spring Security OAuth2 Resource Server의 표준 Bearer 필터와 Nimbus JwtEncoder/Decoder를 사용한다. HS256만 허용하고 외부 Base64 키(디코딩 32바이트 이상)로 발급/검증한다.
+- 발급 claim: iss, aud, sub(양수 사용자 ID의 문자열), iat, exp, jti, token_use=access. 역할·이메일·비밀번호 등은 담지 않으며 JWT는 암호화된 데이터가 아니다.
+- iss/aud 일치, sub의 양수 Long 정규 형태, iat/exp 필수와 시간 순서, 미래 iat/nbf 거부, token_use=access를 검사한다. exp는 현재 시각보다 커야 하며 만료 유예는 0초다. 모든 시간 검증은 주입된 Clock을 사용한다. 서명/형식/claim 실패는 UNAUTHENTICATED/401, 검증된 토큰 만료는 TOKEN_EXPIRED/401이며 필터 응답은 공통 ApiError와 WWW-Authenticate: Bearer다.
+- 인증 성공 시 UserPrincipal(userId)로 변환한다. 기존 Store/심사/내 정보 서비스의 DB 상태·역할 검사를 유지하므로 계정 비활성화·역할 변경은 다음 요청에 반영된다. JWT의 role 주장으로 권한을 부여하지 않는다.
+- 인증 토큰은 Authorization 헤더만 받는다. 쿠키/query parameter/HTTP Basic/Form 로그인/기존 HttpSession으로 인증하지 않는다.
+- 공개 범위는 가입/로그인 POST 두 개다. 나머지는 STATELESS Bearer 보호다. 현재 구현한 Store/관리자 User/내 정보 경로는 Bearer 전용이므로 CSRF를 제외한다. CSRF 전체 해제는 하지 않으며 아직 없는 Refresh/Logout 쿠키 인증 정책은 후속 단계에서 정의한다.
+- CORS는 설정된 origin만 허용하며 기본 http://localhost:5173, GET/POST/PATCH/OPTIONS, Authorization/Content-Type 헤더다. credentials는 false다. CORS 거부는 Spring CORS 처리기의 403이며 인증 오류 ApiError와는 별개다.
+
+### GET `/api/v1/users/me`
+
+검증된 UserPrincipal의 DB 사용자가 ACTIVE인지 확인한 뒤 위 user DTO를 200/no-store로 반환한다. 없는/삭제된 사용자 ID는 UNAUTHENTICATED/401이고 비활성 등은 ACCOUNT_*/403이다. 요청 본문의 사용자 ID로 대상을 선택하지 않는다.
+
+### 설정·제외 범위
+
+웹 기동 시 JASHOP_JWT_SECRET_BASE64는 필수다. issuer 기본 https://jashop.local, audience jashop-api, Access TTL 기본 900초(설정 1~86400초)이며 이는 구현 기본값으로 운영 TTL 정책은 별도 검토한다. 비웹 관리자 부트스트랩은 JWT 설정 없이 실행한다. Refresh/AuthSession/로그아웃·자동 연장·로그인 실패 제한은 이번 범위에서 추가하지 않는다. 새 DB 스키마나 V5는 필요하지 않다.

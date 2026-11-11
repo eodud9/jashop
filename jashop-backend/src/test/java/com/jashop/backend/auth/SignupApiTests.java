@@ -53,7 +53,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @Import(SignupApiTests.FixedClockConfig.class)
 @Testcontainers
 @ExtendWith(OutputCaptureExtension.class)
-class SignupApiTests {
+class SignupApiTests extends com.jashop.backend.support.JwtTestSupport {
     @Container
     @ServiceConnection
     static final MySQLContainer mysql = new MySQLContainer("mysql:8.4")

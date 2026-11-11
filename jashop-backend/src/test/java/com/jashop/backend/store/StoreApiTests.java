@@ -49,7 +49,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @AutoConfigureMockMvc
 @Import(StoreApiTests.FixedClock.class)
 @Testcontainers
-class StoreApiTests {
+class StoreApiTests extends com.jashop.backend.support.JwtTestSupport {
     @Container
     @ServiceConnection
     static final MySQLContainer mysql = new MySQLContainer("mysql:8.4");
@@ -118,12 +118,10 @@ class StoreApiTests {
     }
 
     @Test
-    void writesKeepCsrfProtectionAndReturnCommonError() throws Exception {
+    void bearerOnlyStoreWritesDoNotRequireCsrf() throws Exception {
         mvc.perform(patch("/api/v1/stores/{id}/deactivate", firstId).with(actor(managerId)))
-                .andExpect(status().isForbidden())
-                .andExpect(jsonPath("$.code").value("ACCESS_DENIED"))
-                .andExpect(jsonPath("$.traceId").isNotEmpty());
-        assertThat(stores.findById(firstId).orElseThrow().isActive()).isTrue();
+                .andExpect(status().isOk()).andExpect(jsonPath("$.active").value(false));
+        assertThat(stores.findById(firstId).orElseThrow().isActive()).isFalse();
     }
 
     @Test

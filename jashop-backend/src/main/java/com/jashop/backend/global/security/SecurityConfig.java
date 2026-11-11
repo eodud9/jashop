@@ -1,17 +1,27 @@
 package com.jashop.backend.global.security;
 
 import java.time.Clock;
+import java.util.Arrays;
+import java.util.List;
 
 import org.springframework.context.annotation.Bean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.annotation.Order;
+import org.springframework.core.env.Environment;
 import org.springframework.http.HttpMethod;
 import org.springframework.security.config.Customizer;
+import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.servlet.util.matcher.PathPatternRequestMatcher;
+import org.springframework.security.web.util.matcher.OrRequestMatcher;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.oauth2.jwt.JwtDecoder;
+import org.springframework.web.cors.CorsConfiguration;
+import org.springframework.web.cors.CorsConfigurationSource;
+import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 import tools.jackson.databind.json.JsonMapper;
 
 @Configuration(proxyBeanMethods = false)
@@ -19,46 +29,51 @@ import tools.jackson.databind.json.JsonMapper;
 public class SecurityConfig {
     @Bean
     @Order(1)
-    public SecurityFilterChain signupSecurityFilterChain(HttpSecurity http) throws Exception {
-        // 공개 가입 POST에만 적용한다. 쿠키 인증/세션을 사용하지 않는다.
-        http.securityMatcher(PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/v1/auth/signup"))
+    public SecurityFilterChain publicAuthSecurityFilterChain(HttpSecurity http) throws Exception {
+        // JSON 가입/로그인 POST만 공개한다. 인증 쿠키/세션을 발급하지 않는다.
+        var paths = PathPatternRequestMatcher.withDefaults();
+        http.securityMatcher(new OrRequestMatcher(paths.matcher(HttpMethod.POST, "/api/v1/auth/signup"),
+                        paths.matcher(HttpMethod.POST, "/api/v1/auth/login")))
                 .authorizeHttpRequests(authorize -> authorize.anyRequest().permitAll())
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+                .cors(Customizer.withDefaults())
+                .requestCache(AbstractHttpConfigurer::disable)
                 .csrf(csrf -> csrf.disable());
         return http.build();
     }
 
     @Bean
     @Order(2)
-    public SecurityFilterChain storeSecurityFilterChain(HttpSecurity http, JsonMapper json, Clock clock) throws Exception {
+    public SecurityFilterChain bearerSecurityFilterChain(HttpSecurity http, JsonMapper json, Clock clock,
+            JwtDecoder decoder) throws Exception {
         var errors = new ApiSecurityErrorHandler(json, clock);
-        http.securityMatcher("/api/v1/stores", "/api/v1/stores/**")
-                .authorizeHttpRequests(authorize -> authorize.anyRequest().authenticated())
-                .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
-                .exceptionHandling(exceptions -> exceptions.authenticationEntryPoint(errors).accessDeniedHandler(errors));
-        // JWT 도입 전까지 CSRF 검사를 유지한다. Basic/Form 인증으로 Store 사용자를 생성하지 않는다.
-        return http.build();
-    }
-
-    @Bean
-    @Order(3)
-    public SecurityFilterChain userReviewSecurityFilterChain(HttpSecurity http, JsonMapper json, Clock clock) throws Exception {
-        var errors = new ApiSecurityErrorHandler(json, clock);
-        http.securityMatcher("/api/v1/admin/users", "/api/v1/admin/users/**")
-                .authorizeHttpRequests(authorize -> authorize.anyRequest().authenticated())
-                .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
-                .exceptionHandling(exceptions -> exceptions.authenticationEntryPoint(errors).accessDeniedHandler(errors));
-        // Store와 동일한 principal 계약을 사용하며 CSRF를 유지한다. 로그인/JWT는 후속 구현이다.
-        return http.build();
-    }
-
-    @Bean
-    @Order(4)
-    public SecurityFilterChain defaultSecurityFilterChain(HttpSecurity http) throws Exception {
-        // JWT 단계 전까지 기존 Boot 기본 인증 정책을 유지한다.
         http.authorizeHttpRequests(authorize -> authorize.anyRequest().authenticated())
-                .httpBasic(Customizer.withDefaults())
-                .formLogin(Customizer.withDefaults());
+                .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+                .cors(Customizer.withDefaults())
+                .requestCache(AbstractHttpConfigurer::disable)
+                .logout(AbstractHttpConfigurer::disable)
+                .csrf(csrf -> csrf.ignoringRequestMatchers("/api/v1/stores", "/api/v1/stores/**",
+                        "/api/v1/admin/users", "/api/v1/admin/users/**", "/api/v1/users/me"))
+                .oauth2ResourceServer(resource -> resource
+                        .jwt(jwt -> jwt.decoder(decoder).jwtAuthenticationConverter(token ->
+                                UsernamePasswordAuthenticationToken.authenticated(
+                                        new UserPrincipal(Long.valueOf(token.getSubject())), null, List.of())))
+                        .authenticationEntryPoint(errors).accessDeniedHandler(errors))
+                .exceptionHandling(exceptions -> exceptions.authenticationEntryPoint(errors).accessDeniedHandler(errors));
+        // 표준 Bearer 필터로 인증하고 기존 서비스에서 DB의 계정 상태/역할을 검증한다.
         return http.build();
+    }
+
+    @Bean
+    public CorsConfigurationSource corsConfigurationSource(Environment environment) {
+        var cors = new CorsConfiguration();
+        cors.setAllowedOrigins(Arrays.stream(environment.getProperty("jashop.security.allowed-origins",
+                "http://localhost:5173").split(",")).map(String::strip).filter(value -> !value.isEmpty()).toList());
+        cors.setAllowedMethods(List.of("GET", "POST", "PATCH", "OPTIONS"));
+        cors.setAllowedHeaders(List.of("Authorization", "Content-Type"));
+        cors.setAllowCredentials(false);
+        var source = new UrlBasedCorsConfigurationSource();
+        source.registerCorsConfiguration("/**", cors);
+        return source;
     }
 }

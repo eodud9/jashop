@@ -10,7 +10,7 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 @SpringBootTest
 @ActiveProfiles("test")
-class JashopBackendApplicationTests {
+class JashopBackendApplicationTests extends com.jashop.backend.support.JwtTestSupport {
 
 	// 이 컨텍스트 테스트는 DB 자동 설정을 제외하므로 영속성 의존성만 대체한다.
 	@MockitoBean

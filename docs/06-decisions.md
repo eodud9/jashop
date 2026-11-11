@@ -272,3 +272,15 @@
 - 보안: 기존 UserPrincipal과 서비스 인가를 재사용한다. StoreSecurityErrorHandler를 ApiSecurityErrorHandler로 이름 변경해 보호 API들의 필터 오류에 재사용한다. 관리자 User 전용 STATELESS 체인은 CSRF를 유지하며 Basic/Form 인증을 제공하지 않는다. 비밀번호·해시를 DTO에 노출하지 않고 거절 요청 toString은 내용을 숨긴다.
 - 한계: 로그인/JWT 발급은 여전히 미구현이며 테스트 인증 객체로 운영 필터/DB를 검증한다. 요청자 권한 변경까지 잠그거나 잠금 timeout을 자동 재시도하지 않는다. 기존 Compose DB/볼륨에는 V4를 적용하거나 실사용자를 승인하지 않았다.
 - 검증: `./gradlew test --offline` 전체 190건 통과(기존 142 + 신규 API/MySQL 42 + 도메인 6, 실패/오류/스킵 0). 동시 심사 단일 성공, Store 잠금 대기/비활성 커밋 후 승인 거부와 V3→V4 데이터 보존·재실행을 실제 MySQL에서 확인했다.
+
+
+### D-20261111-01: 로그인과 Access JWT 인증 (Phase 3-1)
+
+- 상태: 채택.
+- 선택: 공개 JSON 로그인 POST와 내 정보 GET을 추가했다. 이메일 정규화·기존 BCrypt 검증 후 ACTIVE 사용자에게 Access JWT만 발급한다. 자격 증명 오류는 동일한 INVALID_CREDENTIALS/401이며 없는 사용자도 비교용 BCrypt 해시로 검증한다. 계정 상태 오류는 비밀번호 확인 후 반환한다.
+- 기술: Spring Security의 resource-server/jose 의존성을 Boot BOM 버전으로 추가해 표준 Bearer 필터·Nimbus 발급/검증을 사용한다. HS256으로 고정하고 Base64 디코딩 32바이트 이상인 외부 키를 필수로 받는다. 키 오류는 원문 없이 고정 메시지로 기동을 거부하며 비웹 부트스트랩에는 키를 요구하지 않는다. 공식 문서: https://docs.spring.io/spring-security/reference/servlet/oauth2/resource-server/jwt.html
+- 토큰: iss/aud/sub/iat/exp/jti/token_use=access를 발급하고 역할/비밀번호·개인정보를 담지 않는다. signature/algorithm 및 필수 claim·시간을 검증한다. 만료 유예는 0초이며 검증 Clock을 주입한다. 만료는 TOKEN_EXPIRED/401, 나머지 토큰 오류는 UNAUTHENTICATED/401이다. 서비스의 DB 상태·역할 검사를 유지하므로 토큰의 role 주장을 권한으로 사용하지 않는다.
+- 설정: issuer 기본 https://jashop.local(식별값, discovery 없음), audience jashop-api, TTL 기본 900초와 설정 범위 1~86400초를 사용한다. 이는 구현 기본값이며 운영 TTL·로그인 실패 제한 정책과 구분한다. 기존 O-20의 Refresh TTL/실패 제한은 아직 미결이다.
+- HTTP: 공개 가입/로그인 POST와 나머지 Bearer 보호 체인 2개를 사용하며 Basic/Form 및 기본 logout 필터를 제거했다. 쿠키/query/기존 HttpSession으로 인증하지 않고 로그인/내 정보 응답은 no-store다. 현재 Bearer 업무 경로의 CSRF 요구를 제거하고 미래 쿠키 경로까지 전역 해제하지 않는다. CORS는 설정 origin만 허용하고 credentials=false다. CSRF 공식 근거: https://docs.spring.io/spring-security/reference/servlet/exploits/csrf.html
+- 한계: Refresh/AuthSession/로그아웃·Access 세션별 폐기·로그인 실패 제한·키 순환 관리·프론트 화면은 이번 범위에 없다. 토큰 만료 시 재로그인하며 진행 중인 업무와 권한 변경까지 직렬화하는 것은 아니다. 새 DDL 없이 V1~V4 및 기존 Compose DB/볼륨을 보존한다.
+- 검증: `./gradlew test --offline` 전체 237건 통과(기존 190 + 로그인/JWT MySQL 통합 40 + 설정 7, 실패/오류/스킵 0). 실제 토큰으로 기존 업무 흐름과 계정/권한 변경 반영을 검증했다. 이전 CSRF 기대값 2건과 잘못된 토큰의 발급기 사전 검증 오류 1건은 테스트 수정 후 해결했다.

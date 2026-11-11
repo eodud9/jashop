@@ -56,7 +56,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @AutoConfigureMockMvc
 @Import(UserReviewApiTests.FixedClock.class)
 @Testcontainers
-class UserReviewApiTests {
+class UserReviewApiTests extends com.jashop.backend.support.JwtTestSupport {
     @Container
     @ServiceConnection
     static final MySQLContainer mysql = new MySQLContainer("mysql:8.4");
@@ -149,13 +149,13 @@ class UserReviewApiTests {
     }
 
     @Test
-    void csrfIsRequiredForBothMutations() throws Exception {
+    void bearerOnlyReviewWritesDoNotRequireCsrf() throws Exception {
         mvc.perform(post(BASE + "/{id}/approve", pendingId).with(actor(managerId))
                         .contentType(MediaType.APPLICATION_JSON).content(approval("STAFF", storeId)))
-                .andExpect(status().isForbidden()).andExpect(jsonPath("$.code").value("ACCESS_DENIED"));
-        mvc.perform(post(BASE + "/{id}/reject", pendingId).with(actor(managerId)))
-                .andExpect(status().isForbidden());
-        assertPendingUnchanged();
+                .andExpect(status().isOk());
+        Long other = pending("no-csrf@example.com");
+        mvc.perform(post(BASE + "/{id}/reject", other).with(actor(managerId)))
+                .andExpect(status().isOk());
     }
 
     @Test
