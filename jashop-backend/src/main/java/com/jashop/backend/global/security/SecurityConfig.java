@@ -77,7 +77,8 @@ public class SecurityConfig {
                 .requestCache(AbstractHttpConfigurer::disable)
                 .logout(AbstractHttpConfigurer::disable)
                 .csrf(csrf -> csrf.ignoringRequestMatchers("/api/v1/stores", "/api/v1/stores/**",
-                        "/api/v1/admin/users", "/api/v1/admin/users/**", "/api/v1/users/me"))
+                        "/api/v1/admin/users", "/api/v1/admin/users/**", "/api/v1/users/me",
+                        "/api/v1/work-schedules", "/api/v1/work-schedules/**"))
                 .oauth2ResourceServer(resource -> resource
                         .jwt(jwt -> jwt.decoder(decoder).jwtAuthenticationConverter(token -> {
                             Long userId = Long.valueOf(token.getSubject());

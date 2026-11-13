@@ -876,3 +876,27 @@ PENDING만 조회한다. page=0, size=20 기본값, size=1~100, id ASC 고정 �
 
 body·유효 Access 필요 없음. 알려진 Refresh(회전된 이전 토큰 포함)의 계열을 잠그고 계열 폐기와 토큰 폐기를 커밋한 뒤 204/no-store/Refresh 쿠키 삭제를 반환한다. 누락/알 수 없는 쿠키는 특정 계열을 식별할 수 없으므로 다른 계열을 변경하지 않고 204로 쿠키만 제거한다. 반복 호출은 최초 폐기 시각을 유지한다.
 Refresh와 로그아웃이 경쟁해도 루트 PK 잠금 때문에 로그아웃 완료 뒤 해당 계열을 되살리지 않는다. DB 실패 시 성공 204로 위장하거나 쿠키를 먼저 제거하지 않는다. 브라우저 응답 순서 때문에 폐기된 쿠키가 나중에 저장될 수 있으나 서버는 이를 거부한다.
+
+
+## 근무 일정 구현 계약 (2026-11-12, Phase 4)
+
+모든 경로는 /api/v1 하위이며 유효한 Access Bearer와 ACTIVE 계정이 필요하다. CSRF 쿠키로 인증하지 않는다.
+
+| Method | 경로 | 권한 / 응답 |
+|---|---|---|
+| POST | /work-schedules | MANAGER / 201 및 Location |
+| GET | /work-schedules/me | 본인 / 페이지 |
+| GET | /work-schedules | MANAGER 또는 담당 매장 AM / 페이지 |
+| GET | /work-schedules/{id} | 본인, MANAGER, 일정 매장 AM / 200 |
+| PATCH | /work-schedules/{id} | MANAGER / 200 |
+| POST | /work-schedules/{id}/cancel | MANAGER / 200 |
+
+생성 본문은 `{userId,storeId,startAt,endAt}`이다. userId/storeId는 양의 정수, startAt은 필수 오프셋 포함 ISO 8601, endAt은 nullable이다. 대상 직원 ACTIVE, 매장 ACTIVE를 확인한다. 직원 소속과 다른 매장 일정도 생성할 수 있다.
+수정 본문은 `{storeId,startAt,endAt}` 전체 교체다. userId/상태/감사 필드 등 미허용 필드를 보내면 400이다. endAt 생략은 null과 동일하다. 응답 시각은 UTC Z, DB는 UTC datetime(6), workDate는 서울 기준이다. 종료는 시작보다 늦고 같은 서울 날짜여야 하며, 09~19시를 하드코딩하지 않는다.
+
+조회는 `fromDate=2026-11-01&toDate=2026-11-30&page=0&size=20`이며 두 날짜는 필수·양 끝 포함·fromDate<=toDate다. 매장 목록은 storeId가 필수다. page>=0, size=1~100, offset은 int 범위이며 날짜 연도는 1000~9998이다. 정렬은 startAt ASC, id ASC 고정이다. 취소 일정과 비활성 매장의 이력도 조회한다. 내 일정은 요청 userId가 아니라 principal만 사용한다.
+응답 페이지: `{content,page,size,totalElements,totalPages}`. 일정: `{id,userId,storeId,workDate,startAt,endAt,status,createdBy,updatedBy,cancelledBy,cancelledAt,createdAt,updatedAt}`.
+
+체크인 기록이 하나라도 있으면 수정/취소는 409 WORK_SCHEDULE_CHECKED_IN이다. 예정 시작 시각 경과만으로는 차단하지 않는다. CANCELLED 일정의 수정/반복취소와 직원/서울 근무일 활성 중복은 409 WORK_SCHEDULE_CONFLICT다. 취소 후 같은 날 신규 일정 생성은 가능하다. 존재하지 않는 일정/사용자/매장은 각각 404 WORK_SCHEDULE_NOT_FOUND/USER_NOT_FOUND/STORE_NOT_FOUND다. 다른 사람·타 매장 접근은 403, 입력 오류·야간 일정은 400이다.
+
+체크인 API는 이번 범위 밖이다. attendances 테이블만 가드/후속 구현 기반으로 생성했으며, 후속 체크인은 User → WorkSchedule 잠금 및 SCHEDULED 검증에 참여해야 한다.

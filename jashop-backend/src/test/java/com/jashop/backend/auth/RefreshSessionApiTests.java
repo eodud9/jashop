@@ -450,7 +450,7 @@ class RefreshSessionApiTests extends JwtTestSupport {
                     + "VALUES ('preserve@example.com','preserve-hash','보존','STAFF','REJECTED','보존 사유',UTC_TIMESTAMP(6),UTC_TIMESTAMP(6))");
         }
         var upgraded = Flyway.configure().dataSource(url, "root", mysql.getPassword()).locations("classpath:db/migration").cleanDisabled(true).load();
-        assertThat(upgraded.migrate().migrationsExecuted).isEqualTo(1);
+        assertThat(upgraded.migrate().migrationsExecuted).isEqualTo(2);
         assertThat(upgraded.migrate().migrationsExecuted).isZero();
         upgraded.validate();
         try (var connection = DriverManager.getConnection(url, "root", mysql.getPassword()); var sql = connection.createStatement();

@@ -311,6 +311,9 @@ V5로 구현했다. 계열에서 가장 작은 ID가 불변 루트이며 계열 
 | `status` | `VARCHAR(24)` | NOT NULL | SCHEDULED / CANCELLED |
 | `active_work_date` | `DATE` | GENERATED NULLABLE | SCHEDULED이면 work_date, 취소면 NULL |
 | `created_by` | `BIGINT` | NOT NULL FK→users.id | 일정 등록 매니저 |
+| `updated_by` | `BIGINT` | NOT NULL FK→users.id | 최종 변경 매니저 |
+| `cancelled_by` | `BIGINT` | NULL FK→users.id | 취소 매니저 |
+| `cancelled_at` | `DATETIME(6)` | NULL | 취소 시각 UTC |
 | `created_at` | `DATETIME(6)` | NOT NULL | 등록 시각 |
 | `updated_at` | `DATETIME(6)` | NOT NULL | 변경 시각 |
 
@@ -612,3 +615,8 @@ Flyway 적용 후에는 `spring.jpa.hibernate.ddl-auto=validate`를 사용한다
 - NotificationDelivery 작업자 선점/만료/재시도 동작.
 
 실제 마이그레이션을 만들 때 이 문서를 기준으로 열 이름과 API DTO 간 명칭 일치 여부를 점검한다.
+
+
+### Phase 4 구현 메모 (2026-11-12)
+
+V6는 work_schedules와 체크인 변경 가드용 attendances를 생성한다. WorkSchedule API/엔티티를 구현했으며 Attendance API/엔티티는 후속 단계다. work_date는 서울 날짜, UTC start/end에 +9시간한 날짜의 일치와 end>start를 DB CHECK로 검증한다. SCHEDULED이면 취소 메타데이터는 null, CANCELLED이면 두 취소 필드가 필수다. active_work_date는 STORED 생성 열이며 UNIQUE(user_id,active_work_date)로 활성 중복만 제한한다. 일정당 출퇴근 기록은 하나다. 최초/최종/취소 메타데이터를 보관하며 전체 수정 스냅샷 이력은 이번에 추가하지 않는다.

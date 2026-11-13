@@ -225,3 +225,22 @@ Access의 sid가 DB의 활성 계열과 일치하는지 매 요청 확인합니�
 - **MVP 제외:** POS 연동, 자동 재고 차감, 불량·유실, 급여 계산, 인력 자동 추천, AI 음성/자연어 검색.
 
 각 기능의 **확정 정책과 구현 제안은 [결정 기록](docs/06-decisions.md)에서 구분**합니다. 코드와 문서가 달라지면 변경 이유와 테스트 결과를 함께 업데이트합니다.
+
+
+## 근무 일정 관리 (2026-11-12)
+
+근무 일정 생성·조회·수정·취소를 구현했다. /api/v1/work-schedules 및 하위 경로는 Access Bearer 전용이다.
+MANAGER만 생성/수정/취소하며, 본인은 /me 조회, 매장 AM과 MANAGER는 storeId별 목록을 조회한다. 상세는 본인/총괄/일정 매장 AM이 조회한다.
+
+- 생성: POST /api/v1/work-schedules, `{userId,storeId,startAt,endAt}`. startAt은 오프셋 포함 시각, endAt은 null 가능.
+- 수정: PATCH /api/v1/work-schedules/{id}, `{storeId,startAt,endAt}` 묶음 교체. 대상 직원 변경은 허용하지 않는다.
+- 취소: POST /api/v1/work-schedules/{id}/cancel. 행 삭제 없이 이력을 보존한다.
+- 내 목록: GET /api/v1/work-schedules/me?fromDate=2026-11-01&toDate=2026-11-30&page=0&size=20
+- 매장 목록: GET /api/v1/work-schedules?storeId=1&fromDate=2026-11-01&toDate=2026-11-30&page=0&size=20
+- 기간은 서울 날짜 기준 양 끝 포함, 정렬은 startAt/id ASC, size 최대100, 취소 이력 포함이다.
+- 야간 일정은 허용하지 않으며 지정한 종료는 시작보다 늦고 같은 서울 날짜여야 한다. 비경기일 09~19시를 고정하지 않는다.
+- 동일 직원/서울 근무일의 활성 일정 하나. 체크인 기록이 있으면 퇴근 이후에도 수정/취소는 409다.
+
+V6가 work_schedules와 체크인 가드용 attendances 기반을 생성한다. 기존 V1~V5는 유지한다. 다음 웹 기동 시 대상 DB에 V6가 적용되므로 DB 연결 환경을 확인한다. 체크인/아웃/승인/안내 API와 프론트 화면은 다음 단계다. 상세 계약은 docs/04-api-spec.md의 Phase 4 절을 따른다.
+
+검증: `jashop-backend`에서 `./gradlew test --offline`, 전체 **299건 통과**(실패/오류/스킵0). 신규 근무 일정 통합32건은 별도 Testcontainers MySQL을 사용한다.

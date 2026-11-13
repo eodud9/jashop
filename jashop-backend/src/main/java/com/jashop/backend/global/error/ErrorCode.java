@@ -32,6 +32,7 @@ public enum ErrorCode {
     DUPLICATE_STORE_CODE(HttpStatus.CONFLICT, "이미 사용 중인 매장 코드입니다."),
     WORK_SCHEDULE_NOT_FOUND(HttpStatus.NOT_FOUND, "근무 일정을 찾을 수 없습니다."),
     WORK_SCHEDULE_CONFLICT(HttpStatus.CONFLICT, "근무 일정이 충돌합니다."),
+    WORK_SCHEDULE_CHECKED_IN(HttpStatus.CONFLICT, "체크인한 근무 일정은 수정하거나 취소할 수 없습니다."),
     ALREADY_CHECKED_IN(HttpStatus.CONFLICT, "이미 체크인했습니다."),
     ALREADY_CHECKED_OUT(HttpStatus.CONFLICT, "이미 체크아웃했습니다."),
     ATTENDANCE_ACTIVE_SUPPORT(HttpStatus.CONFLICT, "지원 중에는 체크아웃할 수 없습니다."),

@@ -2,7 +2,7 @@
 
 **설계 기준일:** 2026-11-05 · **구현 대조일:** 2026-11-11.
 **[현재]**는 저장소 코드로 확인한 구성, **[권장]**은 미적용 제안이다.
-공통 기반과 Store·User 영속성, 회원가입 API, 초기 MANAGER 생성·인가 서비스 및 Store 조회/관리 및 관리자 가입 심사 API 및 로그인·Access JWT까지 구현했으며, 아래 목표 아키텍처 전체가 구현된 것은 아니다.
+공통 기반과 Store·User 영속성, 회원가입 API, 초기 MANAGER 생성·인가 서비스 및 Store 조회/관리 및 관리자 가입 심사 API 및 로그인·Access/Refresh·로그아웃·근무 일정 API까지 구현했으며, 아래 목표 아키텍처 전체가 구현된 것은 아니다.
 로컬 기동 결과는 2026-11-07 기록이다. 2026-11-09 회원가입 구현 후 전체 테스트 79건을 통과했으며, 이는 기존 Compose DB 기동 검증과 별개다.
 
 ## 1. 현 저장소와 기술 환경
@@ -427,3 +427,8 @@ Spring Security 기반 로그인/Access JWT 검증 및 DB 계정 상태·역할 
 - 로그아웃/재사용은 현재 로그인 계열만 폐기하며 타 로그인은 유지한다. 같은 Refresh 동시 사용은 한 번 회전 후 재사용으로 계열 전체가 폐기되는 엄격한 정책이다. 브라우저/탭 간 단일 Refresh 요청 조정과 응답 유실 시 재로그인이 필요할 수 있다. 유예·자동 재시도는 없다.
 - 실제 브라우저의 Secure/Strict 쿠키 사용에는 HTTPS·같은 사이트 배포가 필요하다. 기본 개발 origin은 이전 값을 유지하므로 HTTPS 환경에 맞게 명시 설정한다. 자동 테스트는 실제 MySQL/보안 필터/쿠키 헤더를 검증하며 실브라우저 TLS 배포 E2E는 범위에 없다.
 - 계열 루트/이력 정리·전체 기기 로그아웃·로그인 실패 제한·키 순환·진행 중 요청 취소는 추가하지 않는다. 기존 V1~V4, Compose DB/볼륨은 유지한다.
+
+
+## workforce 일정 구현 (2026-11-12)
+
+workforce.api/DTO → WorkScheduleService → WorkSchedule/Repository로 구성한다. 기존 UserAuthorizationService와 Bearer principal을 사용한다. 생성은 User → Store, 수정/취소는 소유자 scalar 조회 → User → WorkSchedule → Store 순서다. check-in 존재 검사는 같은 트랜잭션의 JdbcTemplate 잠금 읽기를 사용한다. 스냅샷 읽기 때문에 체크인을 놓치지 않으며 후속 체크인도 같은 User/WorkSchedule 잠금 규약에 참여해야 한다. V6의 attendances는 수정 가드용 기반이며 실제 출퇴근 서비스/API는 후속 단계다.
