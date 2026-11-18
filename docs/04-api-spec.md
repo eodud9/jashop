@@ -248,7 +248,7 @@ Refresh Token은 HttpOnly/Secure 쿠키에만 제공한다. 2026-11-11 사용자
 }
 ```
 
-- `attendanceId`를 클라이언트가 필수로 전달하는 설계는 **기존 대화의 확정 API가 아니다.** 체크아웃 재시도의 대상 식별 모호성은 별도의 API 멱등 정책으로 해결할 미결 사항이다.
+- 2026-11-14 확정: 체크아웃 대상 ID를 X-Attendance-Id 헤더로, 요청 키를 Idempotency-Key 헤더로 필수 전달한다. 아래 Phase 5-1 구현 계약이 이 절의 활성 근무 자동 선택/재시도 미결 설명보다 우선한다.
 - 근무 일정 소유·ACTIVE 계정·사용자당 활성 근무 하나·상태 전이를 User 단위 잠금/트랜잭션으로 보호한다.
 
 ### 3.4 운영 기록 승인 — POST `/attendances/{id}/approve`
@@ -900,3 +900,28 @@ Refresh와 로그아웃이 경쟁해도 루트 PK 잠금 때문에 로그아웃 
 체크인 기록이 하나라도 있으면 수정/취소는 409 WORK_SCHEDULE_CHECKED_IN이다. 예정 시작 시각 경과만으로는 차단하지 않는다. CANCELLED 일정의 수정/반복취소와 직원/서울 근무일 활성 중복은 409 WORK_SCHEDULE_CONFLICT다. 취소 후 같은 날 신규 일정 생성은 가능하다. 존재하지 않는 일정/사용자/매장은 각각 404 WORK_SCHEDULE_NOT_FOUND/USER_NOT_FOUND/STORE_NOT_FOUND다. 다른 사람·타 매장 접근은 403, 입력 오류·야간 일정은 400이다.
 
 체크인 API는 이번 범위 밖이다. attendances 테이블만 가드/후속 구현 기반으로 생성했으며, 후속 체크인은 User → WorkSchedule 잠금 및 SCHEDULED 검증에 참여해야 한다.
+
+
+## 출퇴근 구현 계약 (2026-11-14, Phase 5-1)
+
+| Method | /api/v1 하위 경로 | 요청 / 응답 |
+|---|---|---|
+| POST | /attendances/me/check-in | JSON {workScheduleId} / 200 |
+| POST | /attendances/me/check-out | 본문 없음, X-Attendance-Id와 Idempotency-Key 헤더 필수 / 200 |
+| GET | /attendances/me/current | 본인 활성 출근, 없으면204/있으면200 |
+
+모두 유효한 Bearer와 ACTIVE 본인만 허용한다. MANAGER도 다른 사람을 대신 체크인/아웃할 수 없다. 체크인 대상은 본인의 SCHEDULED 일정과 ACTIVE 매장이어야 하고 서버 시각의 서울 날짜가 workDate여야 한다. 그날이면 예정 시작 전 체크인도 허용한다. checkInAt은 실제 서버 시각, recordedCheckInAt은 실제/예정 중 늦은 시각이다. 출퇴근 시각은 요청으로 지정할 수 없다.
+응답: {id,workScheduleId,checkInAt,recordedCheckInAt,checkOutAt,recordedCheckOutAt,approvalStatus,approvedBy,approvedAt}. 모든 시각은 UTC Z이며 no-store다. 운영 퇴근 기록·승인 API는 아직 없다.
+
+체크아웃 예시:
+```http
+POST /api/v1/attendances/me/check-out
+Authorization: Bearer {accessToken}
+X-Attendance-Id: 801
+Idempotency-Key: 8e477ae5-080f-409a-b50c-906f46d545ef
+```
+키는 ASCII 영문/숫자/._:- 1~128자로 대소문자 구분이며 사용자별 범위다. 새 작업에는 새 키, 동일 작업 재시도에는 같은 키와 같은 대상 ID를 보낸다. 헤더 누락/잘못된 ID/키/비어 있지 않은 본문은400이다. 쿠키·쿼리 파라미터로 인증/필수 헤더를 대체하지 않는다. CORS 허용 헤더에도 두 커스텀 헤더를 추가했다.
+같은 키·같은 대상은 최초 성공 응답을 재생한다. 같은 키·다른 대상은409 IDEMPOTENCY_KEY_CONFLICT다. 키와 무관하게 이미 체크아웃한 본인 대상은 현재 저장된 해당 결과를200으로 반환하며 checkout 시각을 덮어쓰지 않는다. 과거 요청 때문에 현재 활성 근무를 대신 종료하지 않는다. 키는 자동 정리하지 않는다. 키 기록 삭제 후 키와 대상을 모두 변조하는 동일 사용자 인증 요청은 방어 범위 밖이다.
+
+출근 없음은 current204, 잘못된 대상은404 ATTENDANCE_NOT_FOUND, 타인 대상은403 ACCESS_DENIED, 당일 외 체크인은409 ATTENDANCE_CHECK_IN_DATE, 중복 체크인은409 ALREADY_CHECKED_IN, 다중 활성/서버시각 역전은409 ATTENDANCE_INVALID_STATE다. 체크아웃 기록과 키 응답 저장 실패는 함께 롤백된다.
+지원 이동·배정 검증, 이력 목록, 운영 승인·공지와 서명 증표는 후속이다. 활성 매장만 체크인하지만 출근 이후 매장이 비활성화돼도 본인 체크아웃은 가능하다.

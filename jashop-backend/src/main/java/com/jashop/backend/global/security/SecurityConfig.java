@@ -78,7 +78,8 @@ public class SecurityConfig {
                 .logout(AbstractHttpConfigurer::disable)
                 .csrf(csrf -> csrf.ignoringRequestMatchers("/api/v1/stores", "/api/v1/stores/**",
                         "/api/v1/admin/users", "/api/v1/admin/users/**", "/api/v1/users/me",
-                        "/api/v1/work-schedules", "/api/v1/work-schedules/**"))
+                        "/api/v1/work-schedules", "/api/v1/work-schedules/**",
+                        "/api/v1/attendances/me/check-in", "/api/v1/attendances/me/check-out"))
                 .oauth2ResourceServer(resource -> resource
                         .jwt(jwt -> jwt.decoder(decoder).jwtAuthenticationConverter(token -> {
                             Long userId = Long.valueOf(token.getSubject());
@@ -96,7 +97,7 @@ public class SecurityConfig {
         var cors = new CorsConfiguration();
         cors.setAllowedOrigins(allowedOrigins(environment));
         cors.setAllowedMethods(List.of("GET", "POST", "PATCH", "OPTIONS"));
-        cors.setAllowedHeaders(List.of("Authorization", "Content-Type", "X-XSRF-TOKEN"));
+        cors.setAllowedHeaders(List.of("Authorization", "Content-Type", "X-XSRF-TOKEN", "X-Attendance-Id", "Idempotency-Key"));
         cors.setAllowCredentials(true);
         var source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/**", cors);

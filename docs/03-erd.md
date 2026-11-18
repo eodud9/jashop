@@ -324,6 +324,7 @@ V5로 구현했다. 계열에서 가장 작은 ID가 불변 루트이며 계열 
 | `id` | `BIGINT` | PK NOT NULL | 출퇴근 ID |
 | `work_schedule_id` | `BIGINT` | NOT NULL UNIQUE FK→work_schedules.id | 일정당 하나 |
 | `check_in_at` | `DATETIME(6)` | NOT NULL | 실제 체크인 서버 시각 UTC |
+| `recorded_check_in_at` | `DATETIME(6)` | NOT NULL | 인정 출근: 실제/예정 중 늦은 시각 |
 | `check_out_at` | `DATETIME(6)` | NULL | 실제 체크아웃 서버 시각 UTC |
 | `recorded_check_out_at` | `DATETIME(6)` | NULL | 부매니저가 직접 지정한 30분 단위 운영 시각 |
 | `approval_status` | `VARCHAR(24)` | NOT NULL | PENDING / APPROVED |
@@ -620,3 +621,9 @@ Flyway 적용 후에는 `spring.jpa.hibernate.ddl-auto=validate`를 사용한다
 ### Phase 4 구현 메모 (2026-11-12)
 
 V6는 work_schedules와 체크인 변경 가드용 attendances를 생성한다. WorkSchedule API/엔티티를 구현했으며 Attendance API/엔티티는 후속 단계다. work_date는 서울 날짜, UTC start/end에 +9시간한 날짜의 일치와 end>start를 DB CHECK로 검증한다. SCHEDULED이면 취소 메타데이터는 null, CANCELLED이면 두 취소 필드가 필수다. active_work_date는 STORED 생성 열이며 UNIQUE(user_id,active_work_date)로 활성 중복만 제한한다. 일정당 출퇴근 기록은 하나다. 최초/최종/취소 메타데이터를 보관하며 전체 수정 스냅샷 이력은 이번에 추가하지 않는다.
+
+
+### Phase 5-1 구현 메모 (2026-11-14)
+
+V7는 attendances.recorded_check_in_at을 추가하고 기존 데이터를 GREATEST(check_in_at, 일정 start_at)으로 보충한 뒤 NOT NULL 및 실제 시각 이상 CHECK를 적용한다. 실제/운영 퇴근 및 승인 원본은 변경하지 않는다. Attendance 엔티티와 체크인/아웃/현재 조회를 구현했다.
+새 attendance_checkout_requests는 id BIGINT PK, user_id FK, request_key ASCII VARCHAR(128) ascii_bin, attendance_id FK, response_json LONGTEXT(JSON_VALID CHECK), created_at UTC DATETIME(6)이다. UNIQUE(user_id,request_key)로 사용자별 키 중복을 막고 최초 성공 응답을 저장한다. 자동 삭제/만료는 없다. User 행 잠금으로 동일 사용자 체크아웃을 직렬화하며 원본 체크아웃과 키 저장은 함께 커밋한다. 서명된 요청 증표는 도입하지 않았다.

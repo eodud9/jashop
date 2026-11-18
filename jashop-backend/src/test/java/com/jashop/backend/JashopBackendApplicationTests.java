@@ -28,6 +28,9 @@ class JashopBackendApplicationTests extends com.jashop.backend.support.JwtTestSu
 	@MockitoBean
 	com.jashop.backend.workforce.infrastructure.WorkScheduleRepository schedules;
 
+	@MockitoBean
+	com.jashop.backend.workforce.infrastructure.AttendanceRepository attendances;
+
 	@Test
 	void contextLoads() {
 	}

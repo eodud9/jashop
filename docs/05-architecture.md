@@ -2,7 +2,7 @@
 
 **설계 기준일:** 2026-11-05 · **구현 대조일:** 2026-11-11.
 **[현재]**는 저장소 코드로 확인한 구성, **[권장]**은 미적용 제안이다.
-공통 기반과 Store·User 영속성, 회원가입 API, 초기 MANAGER 생성·인가 서비스 및 Store 조회/관리 및 관리자 가입 심사 API 및 로그인·Access/Refresh·로그아웃·근무 일정 API까지 구현했으며, 아래 목표 아키텍처 전체가 구현된 것은 아니다.
+공통 기반과 Store·User 영속성, 회원가입 API, 초기 MANAGER 생성·인가 서비스 및 Store 조회/관리 및 관리자 가입 심사 API 및 로그인·Access/Refresh·로그아웃·근무 일정·체크인/아웃/현재 조회 API까지 구현했으며, 아래 목표 아키텍처 전체가 구현된 것은 아니다.
 로컬 기동 결과는 2026-11-07 기록이다. 2026-11-09 회원가입 구현 후 전체 테스트 79건을 통과했으며, 이는 기존 Compose DB 기동 검증과 별개다.
 
 ## 1. 현 저장소와 기술 환경
@@ -432,3 +432,8 @@ Spring Security 기반 로그인/Access JWT 검증 및 DB 계정 상태·역할 
 ## workforce 일정 구현 (2026-11-12)
 
 workforce.api/DTO → WorkScheduleService → WorkSchedule/Repository로 구성한다. 기존 UserAuthorizationService와 Bearer principal을 사용한다. 생성은 User → Store, 수정/취소는 소유자 scalar 조회 → User → WorkSchedule → Store 순서다. check-in 존재 검사는 같은 트랜잭션의 JdbcTemplate 잠금 읽기를 사용한다. 스냅샷 읽기 때문에 체크인을 놓치지 않으며 후속 체크인도 같은 User/WorkSchedule 잠금 규약에 참여해야 한다. V6의 attendances는 수정 가드용 기반이며 실제 출퇴근 서비스/API는 후속 단계다.
+
+
+## workforce 출퇴근 구현 (2026-11-14)
+
+AttendanceController/DTO → AttendanceService → Attendance/Repository 및 CheckoutRequestRepository로 연결한다. 체크인 실제/인정 시각 계산과 상태 변경은 도메인, 인증/소유권/잠금/트랜잭션은 서비스가 담당한다. 체크아웃 키 저장은 JdbcTemplate으로 같은 JPA 트랜잭션에 참여한다. 사용자 잠금 이후 키를 FOR UPDATE로 조회하여 REPEATABLE READ의 오래된 스냅샷 재사용을 피한다. 성공 응답은 JSON 스냅샷이며 승인 필드가 나중에 바뀌어도 동일 키에 최초 결과를 반환한다. 지원 기능은 아직 없어 지원 이동 차단까지 구현됐다고 주장하지 않는다.
