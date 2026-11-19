@@ -1,9 +1,11 @@
 # jashop
 
-> **현장 경험에서 출발한 다중 매장 직원 협업 플랫폼**  
-> 설계 기준: 2026-11-05 · 상태: **설계 완료 / 초기 개발 진행 중** · 백엔드 중심 개인 프로젝트
+> **현장 경험에서 출발한 다중 매장 직원 협업 플랫폼**
+> 백엔드 중심 개인 프로젝트
 
 여러 상품 매장의 **근무 일정·출퇴근**, **상품 위치·마지막 수동 재고 확인**, **창고 확인 요청**, **매장 간 인력 지원**, **업무 알림**을 하나로 연결하는 모바일 중심 서비스입니다.
+
+[개발 진행 상태](docs/progress.md) · [개발 계획](docs/07-development-plan.md)
 
 실제 롯데 자이언츠 상품 매장에서 부매니저로 근무하며 겪었던 문제에서 출발했습니다. 다섯 개 매장을 운영하면서 POS 수량과 실제 수량이 다른 경우가 있었고, 창고에 직접 다녀오는 데 한 번에 약 10분이 걸리기도 했습니다. 현재 누가 어느 매장에서 근무하는지, 어떤 직원이 확인 업무를 맡았는지 빠르게 파악하기도 어려웠습니다.
 
@@ -59,7 +61,7 @@ flowchart LR
     SW --> EMP
 ```
 
-**현재 소스에 구현 완료된 구조를 나타내는 다이어그램이 아니라, 설계된 목표 구조입니다.** 실제 구현·배포 완료 시 해당 상태를 업데이트합니다.
+구성 요소와 의존 관계를 표현한 목표 아키텍처입니다.
 
 ## 기술 스택
 
@@ -71,10 +73,8 @@ flowchart LR
 | Frontend | **React, TypeScript, Vite, PWA** | 모바일 우선 UX, 설치형 웹, Web Push |
 | Authentication | **Spring Security + JWT + AuthSession** | 접근 토큰 검증 및 Refresh 회전/폐기 |
 | Notification | **SSE + Web Push/VAPID + MySQL Delivery** | 온라인/백그라운드 알림과 재시도 분리 |
-| Infra | **Docker Compose**, AWS(추후) | 로컬 재현성과 배포 확장 |
+| Infra | **Docker Compose**, AWS | 로컬 재현성과 배포 확장 |
 | Test | **JUnit, Spring Boot Test, Testcontainers(MySQL)** | 실제 DB 동시성 및 제약 검증 |
-
-> Kafka, Elasticsearch, POS 연동, AI 음성 검색은 초기 MVP에서 제외합니다. 필요성이 검증되면 별도 의사결정 후 추가합니다.
 
 ## 저장소 구조
 
@@ -88,16 +88,17 @@ jashop/
 │   ├── 04-api-spec.md
 │   ├── 05-architecture.md
 │   ├── 06-decisions.md
-│   └── 07-development-plan.md
-├── jashop-backend/        # 생성된 Spring Boot 프로젝트
+│   ├── 07-development-plan.md
+│   └── progress.md
+├── jashop-backend/        # Spring Boot 프로젝트
 │   ├── build.gradle
 │   ├── gradlew
 │   └── src/
-└── jashop-frontend/       # 생성된 React/Vite 프로젝트
+└── jashop-frontend/       # React/Vite 프로젝트
 ```
 
 로컬 인프라는 루트 `compose.yml`, 백엔드 연결은 `application.yaml`에 구성되어 있습니다.
-Flyway V1은 `stores`, V2는 `users`, V3은 초기 관리자 생성 보호용 `manager_bootstrap`, V4는 users의 거절 사유 컬럼을 추가하며, 이후 DDL은 기능별로 추가합니다.
+데이터베이스 스키마는 Flyway 마이그레이션으로 관리합니다.
 기존 문서에 적힌 `backend/`, `frontend/` 대신 **현재 저장소의 실제 폴더명**을 기준으로 합니다.
 
 ## 로컬 실행
@@ -120,20 +121,18 @@ npm run dev
 ```
 
 - MySQL·Redis 연결 URL과 비밀번호는 개발용 환경변수 또는 Git에 포함하지 않는 `.env`로 주입합니다.
-- 현재 `application.yaml`은 MySQL `localhost:3308/jashop`, `${DB_USERNAME:jashop}`, `${DB_PASSWORD}`를 사용합니다. Compose 포트/계정과 일치해야 합니다.
+- `application.yaml`은 MySQL `localhost:3308/jashop`, `${DB_USERNAME:jashop}`, `${DB_PASSWORD}`를 사용합니다. Compose 포트/계정과 일치해야 합니다.
 - Compose가 읽는 `.env`는 Gradle/Spring에 자동 전달되지 않습니다. `bootRun` 실행 환경에도 DB 계정과 `DB_PASSWORD`를 설정해야 합니다.
 - 프로젝트 이름 변경은 기존 MySQL 스키마·계정·Docker 컨테이너·볼륨을 자동으로 변경하지 않습니다. 루트 폴더명 변경으로 Compose 프로젝트명과 기본 볼륨명도 달라집니다. 기존 데이터를 사용할 때는 기존 볼륨과 DB 연결 설정을 명시적으로 맞춘 뒤 실행하며, 볼륨을 삭제해 초기화하지 않습니다. 새 `jashop` 스키마·계정으로 데이터를 이전하는 작업은 별도로 수행합니다.
 - `./gradlew`는 **`jashop-backend/`** 아래에서 실행합니다.
 - 전체 테스트에는 Docker가 필요합니다. Testcontainers가 기존 Compose DB/볼륨과 분리된 MySQL 8.4를 생성하며, Docker가 없으면 통합 테스트는 실패합니다(자동 스킵 없음).
-- 2026-11-07 `./gradlew test`로 **29건 통과**: 공통 20건 + 실제 MySQL Store 영속성/마이그레이션 9건. 기존 공통 테스트는 계속 외부 DB와 분리됩니다.
-- 이름 변경 전 로컬 MySQL 8.4.11의 빈 스키마에 V1 적용 후, 비웹 모드 기동을 두 번 실행해 최초 적용·재실행·JPA `validate`를 확인했습니다. HTTP API, Redis 기능, User 도메인은 이 검증에 포함되지 않습니다.
 
 ## 초기 MANAGER 생성
 
 회원가입 API로 총괄 권한을 취득할 수 없다. 최초 운영자만 별도의 비웹 부트스트랩으로 생성한다.
 기존 MANAGER가 있거나 생성 완료 기록이 있으면 재실행을 거부하며 기존 계정의 승격·비밀번호 재설정은 하지 않는다.
 
-1. 대상 DB와 DB_USERNAME/DB_PASSWORD를 확인한다. 이 명령은 대상 DB에 미적용 Flyway 마이그레이션(V5 포함)을 적용한다.
+1. 대상 DB와 DB_USERNAME/DB_PASSWORD를 확인한다. 이 명령은 대상 DB에 미적용 Flyway 마이그레이션을 적용한다.
 2. `JASHOP_BOOTSTRAP_NAME`, `JASHOP_BOOTSTRAP_EMAIL`, `JASHOP_BOOTSTRAP_PASSWORD`를 실행 환경에 주입한다. 비밀번호는 회원가입과 동일하게 8~72자/UTF-8 최대 72바이트다. 비밀 관리 도구나 터미널의 숨김 입력을 사용하고 명령행 인자·소스·공유 로그에 비밀번호를 기록하지 않는다.
 3. 백엔드 디렉터리에서 다음을 실행한다. 부트스트랩은 기본 비활성이며 비웹 모드를 명시해야 한다.
 
@@ -143,7 +142,7 @@ JASHOP_BOOTSTRAP_ENABLED=true ./gradlew --no-daemon bootRun --args='--spring.mai
 
 성공 시 `ACTIVE/MANAGER` 계정과 생성 완료 기록을 같은 트랜잭션으로 저장한다. 기본 소속 매장과 승인자/승인 시각은 없고 완료 기록의 user_id/completed_at이 운영자 생성 근거다. 완료 기록을 지우거나 기존 계정을 자동 변경하지 않는다. 실행 후 부트스트랩 환경변수, 특히 비밀번호를 실행 환경에서 제거한다. 웹 서버는 일반 실행 환경으로 별도 기동한다.
 
-생성된 ACTIVE 관리자 계정은 JWT 설정 후 로그인 API로 인증할 수 있다. 비웹 관리자 생성에는 JWT 키가 필요하지 않다. 이번 구현에서는 기존 Compose DB에 마이그레이션을 적용하거나 실제 관리자 계정을 생성하지 않았다.
+생성된 ACTIVE 관리자 계정은 JWT 설정 후 로그인 API로 인증할 수 있다. 비웹 관리자 생성에는 JWT 키가 필요하지 않다.
 
 ## 로그인과 Access JWT 실행
 
@@ -167,7 +166,7 @@ export JASHOP_JWT_SECRET_BASE64="$(openssl rand -base64 32)"
 
 `POST /api/v1/auth/login`에 `{email,password}` JSON을 보내면 `{accessToken,tokenType,expiresIn,user}`를 반환합니다. ACTIVE 계정만 로그인할 수 있으며 로그인 성공 응답은 no-store입니다. Access는 JSON으로, Refresh는 Secure/HttpOnly 쿠키로 발급하며 HTTP 세션은 만들지 않습니다. 로그인 전에 아래 CSRF 절차가 필요합니다. 토큰을 얻은 후 `Authorization: Bearer {accessToken}` 헤더로 `GET /api/v1/users/me`, Store·가입 심사 API를 호출합니다. 비밀번호·토큰을 명령행 인자나 공유 파일에 남기지 않습니다.
 
-현재 구현된 Bearer 업무 API는 CSRF 토큰을 요구하지 않으며 쿠키·Basic·기존 세션으로 인증하지 않습니다. Access 만료 시 Refresh 쿠키로 재발급합니다. 로그아웃 후 해당 로그인 계열의 Access는 다음 요청부터 즉시 거부합니다. 로그인 실패 횟수 제한·키 순환/폐기 관리·프론트엔드 로그인 화면은 이번 범위에 없습니다. 토큰은 개인 정보 암호화 수단이 아니므로 사용자 ID와 검증용 claim만 담습니다.
+Bearer 업무 API는 CSRF 토큰을 요구하지 않으며 쿠키·Basic·기존 세션으로 인증하지 않습니다. Access 만료 시 Refresh 쿠키로 재발급합니다. 로그아웃 후 해당 로그인 계열의 Access는 다음 요청부터 즉시 거부합니다. 토큰은 개인 정보 암호화 수단이 아니므로 사용자 ID와 검증용 claim만 담습니다.
 
 ## Refresh·로그아웃 사용 절차
 
@@ -181,16 +180,17 @@ export JASHOP_JWT_SECRET_BASE64="$(openssl rand -base64 32)"
 
 Refresh 쿠키는 Secure/HttpOnly/SameSite=Strict/Path=/api/v1/auth이며 7일 중 남은 시간만 Max-Age로 설정합니다. CSRF 쿠키도 Secure/HttpOnly/SameSite=Strict/같은 Path입니다. 실제 브라우저 사용에는 **HTTPS와 같은 사이트 구성**이 필요합니다. 기본 개발 origin은 기존 http://localhost:5173을 유지하므로 HTTPS 프론트에서는 JASHOP_SECURITY_ALLOWED_ORIGINS를 실제 HTTPS origin으로 지정하고 HTTPS 서버/프록시를 구성합니다. 서로 다른 사이트의 프론트·API 배포는 Strict 쿠키 정책으로 지원하지 않습니다.
 
-CORS는 credentials=true와 명시적 origin 목록을 사용하며 와일드카드 origin은 허용하지 않습니다. 허용 헤더에 X-XSRF-TOKEN을 추가했습니다. CSRF·Origin 검사는 로그인/refresh/logout POST 모두에 적용하고 Bearer 업무 API의 인증 방법은 유지합니다.
+CORS는 credentials=true와 명시적 origin 목록을 사용하며 와일드카드 origin은 허용하지 않습니다. 허용 헤더에는 X-XSRF-TOKEN이 포함됩니다. CSRF·Origin 검사는 로그인/refresh/logout POST 모두에 적용하고 Bearer 업무 API의 인증 방법은 유지합니다.
 
 동일 Refresh를 동시에 두 번 사용하면 한 번만 회전하고 나머지는 재사용으로 판단해 **승자가 받은 새 토큰까지 그 계열 전체를 폐기**합니다. 프론트엔드는 탭/요청 간 재발급을 조정해야 하며 응답 유실 후 이전 Refresh 재시도에도 재로그인이 필요할 수 있습니다. 유예 기간은 두지 않았습니다.
 
-Access의 sid가 DB의 활성 계열과 일치하는지 매 요청 확인합니다. 따라서 DB 조회 비용이 추가되며, 이 변경 전 sid 없는 기존 Access는 재로그인이 필요합니다. 로그아웃 완료 전에 이미 인증 검사를 통과한 진행 중 요청을 취소하지는 않습니다. 계열 루트 행은 회전 후에도 폐기/만료 판단에 사용하므로 보존하며 정리 작업은 아직 구현하지 않았습니다. 기존 Compose DB에 V5를 직접 적용하거나 실제 로그인 데이터를 변경하지 않았습니다.
+Access의 sid가 DB의 활성 계열과 일치하는지 매 요청 확인합니다. 따라서 DB 조회 비용이 추가됩니다. sid 없는 Access는 사용할 수 없으므로 재로그인이 필요합니다. 로그아웃 완료 전에 이미 인증 검사를 통과한 진행 중 요청을 취소하지는 않습니다. 계열 루트 행은 회전 후에도 폐기/만료 판단에 사용하므로 보존합니다.
 
 ## 문서
 
 | 문서 | 내용 |
 |---|---|
+| [개발 진행 상태](docs/progress.md) | 구현 범위, 완료·후속 작업, 최신 검증 결과와 이전 기록 |
 | [01. 요구사항](docs/01-requirements.md) | 실제 업무 문제, 역할, 기능·비기능 요구사항, 시나리오, 인수 조건 |
 | [02. 도메인 모델](docs/02-domain-model.md) | 17개 엔티티, 상태 전이, 현재 근무 매장 계산, 핵심 불변 조건 |
 | [03. ERD](docs/03-erd.md) | 전체 관계도, 컬럼 사전, FK·UNIQUE·INDEX 및 마이그레이션 주의점 |
@@ -207,82 +207,3 @@ Access의 sid가 DB의 활성 계열과 일치하는지 매 요청 확인합니�
 4. **서로 다른 요청 간 직원 중복 배정 방지** — User 행 잠금과 활성 배정 검사, 일관된 잠금 순서를 적용합니다.
 5. **확인 완료의 원자성** — StockVerification, StockRecord, StockCheckRequest를 같은 MySQL 트랜잭션에서 변경합니다.
 6. **업무 기록과 외부 푸시 호출 분리** — 알림/전송 작업을 DB에 저장한 뒤 Worker가 비동기로 발송합니다.
-
-## 범위 및 진행 상태
-
-- **완료:** 요구사항·핵심 정책 합의, 17개 테이블 논리 설계, API 설계, 백엔드·프론트엔드 프로젝트 생성. Phase 1 공통 패키지·오류 응답·UTC Clock·Flyway 경로/안전 설정(2026-11-07).
-- **완료(Phase 2-0/2-1):** 기존 DB 사전 점검, Store V1 마이그레이션·엔티티·Repository, UTC DATETIME(6) 매핑, 실제 MySQL 통합 테스트. 로컬 V1 적용 후 `stores` 행은 0개이며 임의 매장 시드는 없습니다.
-- **현재 소스:** 루트 `compose.yml` 및 `application.yaml` 연결 설정 존재. 공통 테스트는 외부 MySQL/Redis 없이 실행하도록 분리.
-- **완료(Phase 2-2A):** User 엔티티·역할/상태 enum·Repository, V2 users 마이그레이션, 이메일 정규화 및 MySQL 제약 검증. 로컬 운영 DB에 V2를 적용한 것은 아닙니다.
-- **완료(Phase 2-2B):** 공개 회원가입 API(`POST /api/v1/auth/signup`), DTO 검증, BCrypt 비밀번호 해시, 중복 이메일 409 처리. 가입자는 STAFF/PENDING/소속 없음으로 생성되며 토큰·세션은 발급하지 않습니다.
-- **완료(Phase 2-2C):** 운영 전용 초기 MANAGER 일회성 생성, DB 잠금/완료 기록, 계정 상태·총괄·담당 매장 부매니저 인가 서비스.
-- **완료(Phase 2-3):** Store 목록/상세/생성/이름 변경/비활성화 API, 페이지·활성 필터·ID 오름차순 정렬, 변경 행 잠금 및 인가 연결. 인증 principal 발급은 Phase 3-1의 Access JWT 인증으로 연결했습니다.
-- **최신 검증(2026-11-11):** 백엔드 `./gradlew test --offline` 전체 267건 통과(실패/오류/스킵 0). Refresh/로그아웃 통합 29건 및 고정 TTL 검증 1건 추가.
-- **완료(Phase 2-4):** 총괄 전용 승인 대기 목록·직원/부매니저 승인·거절 API, 대상 사용자/매장 행 잠금, 승인자·시각 및 선택적 거절 사유(V4) 저장.
-- **완료(Phase 3-1):** 이메일/비밀번호 로그인, Access JWT 발급·검증, 내 정보 조회 및 기존 업무 API Bearer 인증 연결.
-- **완료(Phase 3-2):** Refresh 7일 절대 만료·회전·재사용 감지, 현재 로그인 계열 로그아웃 및 Access 즉시 차단, CSRF/Origin 검증, V5 auth_sessions.
-- **진행 예정:** 나머지 업무 DDL·API·통합 테스트, PWA 화면 및 Web Push 실기기 검증, CI/CD·AWS 배포.
-- **MVP 제외:** POS 연동, 자동 재고 차감, 불량·유실, 급여 계산, 인력 자동 추천, AI 음성/자연어 검색.
-
-각 기능의 **확정 정책과 구현 제안은 [결정 기록](docs/06-decisions.md)에서 구분**합니다. 코드와 문서가 달라지면 변경 이유와 테스트 결과를 함께 업데이트합니다.
-
-
-## 근무 일정 관리 (2026-11-12)
-
-근무 일정 생성·조회·수정·취소를 구현했다. /api/v1/work-schedules 및 하위 경로는 Access Bearer 전용이다.
-MANAGER만 생성/수정/취소하며, 본인은 /me 조회, 매장 AM과 MANAGER는 storeId별 목록을 조회한다. 상세는 본인/총괄/일정 매장 AM이 조회한다.
-
-- 생성: POST /api/v1/work-schedules, `{userId,storeId,startAt,endAt}`. startAt은 오프셋 포함 시각, endAt은 null 가능.
-- 수정: PATCH /api/v1/work-schedules/{id}, `{storeId,startAt,endAt}` 묶음 교체. 대상 직원 변경은 허용하지 않는다.
-- 취소: POST /api/v1/work-schedules/{id}/cancel. 행 삭제 없이 이력을 보존한다.
-- 내 목록: GET /api/v1/work-schedules/me?fromDate=2026-11-01&toDate=2026-11-30&page=0&size=20
-- 매장 목록: GET /api/v1/work-schedules?storeId=1&fromDate=2026-11-01&toDate=2026-11-30&page=0&size=20
-- 기간은 서울 날짜 기준 양 끝 포함, 정렬은 startAt/id ASC, size 최대100, 취소 이력 포함이다.
-- 야간 일정은 허용하지 않으며 지정한 종료는 시작보다 늦고 같은 서울 날짜여야 한다. 비경기일 09~19시를 고정하지 않는다.
-- 동일 직원/서울 근무일의 활성 일정 하나. 체크인 기록이 있으면 퇴근 이후에도 수정/취소는 409다.
-
-V6가 work_schedules와 체크인 가드용 attendances 기반을 생성한다. 기존 V1~V5는 유지한다. 다음 웹 기동 시 대상 DB에 V6가 적용되므로 DB 연결 환경을 확인한다. 체크인/아웃/승인/안내 API와 프론트 화면은 다음 단계다. 상세 계약은 docs/04-api-spec.md의 Phase 4 절을 따른다.
-
-검증: `jashop-backend`에서 `./gradlew test --offline`, 전체 **299건 통과**(실패/오류/스킵0). 신규 근무 일정 통합32건은 별도 Testcontainers MySQL을 사용한다.
-
-
-## 출퇴근 및 체크아웃 재시도 (2026-11-14)
-
-- POST /api/v1/attendances/me/check-in: Bearer + JSON {workScheduleId}. ACTIVE 본인의 일정/활성 매장만 가능하며 서울 근무 당일만 허용한다.
-- checkInAt은 실제 서버 시각 원본, recordedCheckInAt은 실제/예정 중 늦은 시각이다. 예: 예정10:00/실제09:50 → 인정10:00, 예정10:00/실제10:15 → 인정10:15.
-- GET /api/v1/attendances/me/current: 본인의 활성 출근 조회(있으면200, 없으면204). 다른 직원이나 현재 매장을 대신 계산하는 API가 아니다.
-- POST /api/v1/attendances/me/check-out: Bearer, X-Attendance-Id, Idempotency-Key 헤더 필수이며 본문은 없다. 실제 퇴근 시각은 서버가 기록한다.
-- 요청 키는 ASCII 영문/숫자/._:- 1~128자(대소문자 구분). 프론트는 작업당 UUID를 생성하고 재시도에 키와 대상 ID를 함께 유지한다. 같은 키 다른 대상은409, 같은 키 같은 대상은 최초 성공 응답을 재생한다. 이미 종료한 과거 대상의 새 키 요청은 해당 기록을200으로 반환하며 현재 근무를 대신 종료하지 않는다.
-- 키 자동 만료/정리는 도입하지 않았다. 키·대상 전체를 바꾼 유효한 본인 인증 요청에 대한 서명 검증은 구현 범위 밖이다.
-- V7는 인정 출근 시각을 기존 기록에 보충하고 체크아웃 키/결과 테이블을 추가한다. 기존 V1~V6는 변경하지 않았다. 서버 재시작 시 대상 DB에 적용되므로 연결 설정을 확인한다.
-
-운영 퇴근 승인·출퇴근 이력 목록·퇴근 안내·프론트와 지원 이동 검증은 후속 단계다. 체크아웃 시각과 성공 응답 저장은 한 트랜잭션이며 실패하면 함께 롤백된다. 상세 계약은 docs/04-api-spec.md의 Phase 5-1을 따른다.
-
-검증: `./gradlew test --offline` 전체 **336건 통과**(신규 출퇴근37건, 실패/오류/스킵0). 실제 MySQL 테스트는 기존 Compose DB와 분리된 컨테이너에서 수행했다.
-
-
-## 출퇴근 이력·운영 퇴근 승인 (2026-11-18)
-
-- GET /api/v1/attendances/me: 본인 이력. fromDate/toDate 필수, page0/size20(최대100), 선택 approvalStatus=PENDING/APPROVED.
-- GET /api/v1/attendances: storeId 추가 필수, MANAGER 또는 담당 매장 부매니저. 서울 workDate 양 끝 포함, checkInAt/id ASC 고정.
-- POST /api/v1/attendances/{id}/approve: 담당 일정 매장 부매니저(본인 포함), JSON {recordedCheckOutAt:"2026-11-18T18:00:00+09:00"}. 차이 사유는 요구하지 않는다. MANAGER 승인 우회는 없다.
-- 운영 시각은 서울00/30분·초/소수초0, 인정 출근 이상·같은 근무일·승인 서버 시각 이하. 최초 승인 후 변경/반복승인은409다.
-- 직원 입력 완료: 실제 checkOutAt과 종료 출처 유지. 누락: checkOutAt=NULL 유지, closedAt=승인 처리 시각, closureType=ASSISTANT_APPROVAL로 종료한다. 정상 직원 종료 출처는 EMPLOYEE_CHECKOUT이다.
-- 활성 여부는 closedAt=NULL이다. 운영 종료 후 다음 날 체크인 가능, 늦은 직원 체크아웃도 실제 입력 시각을 새로 만들지 않는다. 기존 키는 최초 응답을 유지하고 최신 상태는 이력 조회로 확인한다.
-
-V8는 종료 시각/출처와 상태 제약을 추가한다. V1~V7 및 기존 원본/승인/멱등 응답은 유지한다. 다음 서버 기동 시 V8가 적용된다. 퇴근 안내·알림·지원 이동 검증·원본 정정은 아직 없다.
-
-검증: `./gradlew test --offline` 전체 **377건 통과**(신규 이력·승인41건, 실패/오류/스킵0). MySQL 통합 테스트는 기존 Compose DB와 분리된 컨테이너에서 실행했다.
-
-
-## 퇴근 안내 (2026-11-19)
-
-- POST /api/v1/checkout-notices: ACTIVE 일정 매장 부매니저, JSON {workScheduleIds:[701,702],plannedCheckOutAt:"2026-11-19T18:30:00+09:00"}. 대상은 당일 체크인·미종료, ID1~100개·중복 금지, 같은 서울 근무일·현재보다 늦은30분 단위다. 전원 검증 후 원자적으로 생성한다.
-- GET /api/v1/checkout-notices/me: 본인 수신 이력. GET /api/v1/checkout-notices?storeId=...: MANAGER/담당 부매니저의 매장 발송·확인 이력.
-- 목록은 fromDate/toDate 서울 발송일 양 끝 포함, page0/size20(최대100), sentAt/id 내림차순이다.
-- POST /api/v1/checkout-notices/{id}/acknowledge: 본문 없이 본인만 확인하며 반복/동시 요청에도 최초 acknowledgedAt을 유지한다.
-- 재공지는 새 행으로 남고 각각 확인한다. 일정·실제 출퇴근·운영 승인/종료는 변경하지 않는다. 지원 이동/푸시/SSE/프론트는 아직 없다.
-
-V9가 checkout_notices와 제약/인덱스를 추가한다. 다음 서버 기동 시 적용되며 기존 V1~V8과 출퇴근·승인·키 응답은 유지한다. 생성 재시도는 새 안내로 저장되므로 자동 재시도에 주의하며 생성 멱등 정책은 후속이다.
-
-검증: `./gradlew clean test --offline` 전체 **416건 통과**(신규 안내39건, 실패/오류/스킵0). 초기 빌드 클래스 읽기 I/O 오류는 생성 산출물 정리 후 해소했다. MySQL 테스트는 기존 Compose DB와 분리된 컨테이너에서 수행했다.
