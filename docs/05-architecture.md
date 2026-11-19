@@ -442,3 +442,8 @@ AttendanceController/DTO → AttendanceService → Attendance/Repository 및 Che
 ## 출퇴근 이력 및 운영 종료 (2026-11-18)
 
 AttendanceManagementController → AttendanceManagementService → Attendance.approve로 조회/인가와 승인 상태 전이를 분리한다. 승인자/대상 User를 ID ASC로 잠근 후 WorkSchedule → Attendance 순서로 진행한다. 두 User가 같으면 한 번만 잠근다. 직원 체크아웃은 기존 대상 User 잠금에 참여한다. 근무 종료는 closedAt으로 판단해 직원 입력 없는 운영 승인 종료도 current/중복 출근/체크아웃 재시도에서 일관되게 처리한다. 이력은 Attendance 페이지와 관련 일정의 일괄 조회로 구성해 N+1을 피하고, 기존 멱등 응답 스냅샷은 변경하지 않는다.
+
+
+## workforce 퇴근 안내 (2026-11-19)
+
+CheckoutNoticeController/DTO → CheckoutNoticeService → CheckoutNotice/Repository로 구성한다. 생성 시 전체 대상 소유자 scalar를 먼저 조회하고 참여 User/일정의 ID순 잠금과 출퇴근 잠금을 획득한다. 모든 대상·시간 검증 후 새 행을 저장하며 종료/체크아웃과 대상 User 잠금을 공유한다. 확인은 본인 User/일정/Notice 잠금으로 최초 시각을 보존한다. 목록은 Notice 페이지와 일괄 일정 조회를 사용한다. Notification/SSE/푸시 전송은 호출하지 않으며 별도 알림 단계에서 연결한다.

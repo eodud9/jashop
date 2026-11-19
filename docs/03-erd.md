@@ -634,3 +634,8 @@ V7는 attendances.recorded_check_in_at을 추가하고 기존 데이터를 GREAT
 ### Phase 5-2 구현 메모 (2026-11-18)
 
 V8는 closed_at/closure_type을 추가하고 기존 check_out_at이 있는 행을 EMPLOYEE_CHECKOUT으로 보충한다. 실제 원본/운영 승인/키 응답은 보존한다. PENDING은 승인 메타데이터/운영 퇴근 없음, APPROVED는 운영 퇴근/승인자/승인시각/종료시각 필수다. 열린 행은 closed_at/closure_type/check_out_at이 모두 NULL인 PENDING이다. 직원 종료는 closed_at=check_out_at, 운영 종료는 check_out_at=NULL 및 closed_at=approved_at인 APPROVED다. DB CHECK로 종료 출처 누락·모순을 차단한다. 운영 시각의30분/근무일/인정 출근 이상/미래 아님 규칙은 도메인에서 검증하며 기존 승인 값은 마이그레이션으로 재해석하지 않는다.
+
+
+### Phase 5-3 구현 메모 (2026-11-19)
+
+V9는 설계된 checkout_notices 6개 컬럼을 생성한다. work_schedule_id/sent_by FK, planned_check_out_at>sent_at, 30분 단위(분0/30·초/소수초0), acknowledged_at NULL 또는 sent_at 이상을 CHECK로 보장한다. work_schedule_id/sent_at/id 및 sent_at/id 인덱스로 관련 일정·발송일 이력을 조회한다. 일정당 여러 안내를 허용해 재공지와 개별 확인을 보존한다. 당일/활성 출근·일정 매장/같은 근무일은 Service/도메인에서 잠금 안에 검증한다. 기존 일정·출퇴근 테이블 및 키 응답은 변경하지 않는다.

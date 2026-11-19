@@ -948,3 +948,23 @@ Idempotency-Key: 8e477ae5-080f-409a-b50c-906f46d545ef
 종료 여부는 closedAt으로 판단한다. 누락 승인 후 current204, 다음 근무 체크인 가능, 늦은 직원 체크아웃은 승인 결과를200으로 반환하고 checkOutAt을 채우지 않는다. approvedAt/closedAt은 처리 시각, recordedCheckOutAt은 현장 운영 인정 시각이므로 서로 다를 수 있다.
 시각 단위 오류400 INVALID_CHECKOUT_TIME_UNIT, 범위 오류400 VALIDATION_FAILED, 반복승인409 ATTENDANCE_ALREADY_APPROVED, 미존재404 ATTENDANCE_NOT_FOUND다. 승인자/대상 User ID ASC → 일정 → 출퇴근 잠금으로 동시 승인·체크아웃을 제어하며 승인 실패 시 종료도 롤백한다.
 기존 체크아웃 키는 최초 응답을 재생하고 최신 승인 결과로 덮어쓰지 않는다. 최신 상태는 이력으로 확인한다. 실제 출근/퇴근 원본을 정정하거나 승인 후 재승인하는 API는 추가하지 않는다. 퇴근 안내·지원 이동 검증은 후속이다.
+
+
+## 퇴근 안내 구현 계약 (2026-11-19, Phase 5-3)
+
+| Method | /api/v1 하위 경로 | 권한 / 응답 |
+|---|---|---|
+| POST | /checkout-notices | ACTIVE 일정 매장 AM / 201 |
+| GET | /checkout-notices/me | ACTIVE 본인 수신 이력 / 페이지200 |
+| GET | /checkout-notices | ACTIVE MANAGER 또는 담당 매장 AM / 페이지200 |
+| POST | /checkout-notices/{id}/acknowledge | ACTIVE 대상 본인 / 200 |
+
+생성 본문: {workScheduleIds:[701,702],plannedCheckOutAt:"2026-11-19T18:30:00+09:00"}. ID는1~100개 양의 정수, null/중복/빈 목록 금지. 시각은 오프셋 필수·서울00/30분·초/소수초0, 잠금 획득 후 서버 현재 시각보다 엄격히 이후, 같은 서울 근무일이어야 한다. 대상은 당일 SCHEDULED 일정으로 실제 체크인했고 closedAt=NULL이어야 한다. 직원 기본 소속이 아닌 일정 매장을 검증한다. 한 명이라도 실패하면 전체가 저장되지 않는다.
+201 응답은 {notices:[...]}이며 입력 순서를 유지한다. Notice는 {id,workScheduleId,userId,storeId,workDate,plannedCheckOutAt,sentBy,sentAt,acknowledgedAt}. 모든 시각은 UTC Z, no-store다. 재공지는 새 행이며 이전 안내/확인 정보를 보존한다. 안내 생성/확인으로 일정·출퇴근·운영 승인/종료를 변경하지 않는다.
+
+목록은 fromDate/toDate 필수(서울 발송일 기준 양 끝 포함), page0/size20(최대100), sentAt/id DESC 고정이다. 매장 목록에는 storeId가 필수다. page>=0/offset int 범위, 날짜 연도1000~9998, 시작일<=종료일. 페이지 응답은 {content,page,size,totalElements,totalPages}. 본인 목록은 JWT 사용자만 기준으로 삼는다. 부매니저는 담당 일정 매장의 확인 이력을 보고 MANAGER는 모든 매장을 조회할 수 있다.
+
+확인은 본문 없이 요청한다. 다른 사람·MANAGER·발송자가 대리 확인할 수 없다. 반복/동시 확인에도 최초 서버 acknowledgedAt을 보존한다. 과거/이미 근무 종료한 안내도 본인이 확인할 수 있다. 재공지의 확인 상태는 각각 별도다.
+
+오류: 입력/중복 ID/과거·다른 근무일 시각400 VALIDATION_FAILED, 단위400 INVALID_NOTICE_TIME_UNIT, 부적격 근무409 CHECKOUT_NOTICE_TARGET_INVALID, 일정 미존재404 WORK_SCHEDULE_NOT_FOUND, 안내 미존재404 CHECKOUT_NOTICE_NOT_FOUND, 타 매장/타인 확인403. 일반 직원·MANAGER는 생성할 수 없다. 익명/폐기 토큰은401이다.
+생성 잠금은 참여 User ID ASC → 일정 ID ASC → 출퇴근, 확인은 본인 User → 일정 → Notice이다. 부분 INSERT 오류 시 전체 롤백한다. V9만 추가하며 푸시/실시간 전송과 별도 생성 멱등 키는 아직 없다.

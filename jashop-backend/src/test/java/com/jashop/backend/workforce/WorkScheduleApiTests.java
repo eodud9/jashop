@@ -343,7 +343,7 @@ class WorkScheduleApiTests extends JwtTestSupport {
             sql.executeUpdate("UPDATE manager_bootstrap SET user_id=1,completed_at=UTC_TIMESTAMP(6) WHERE id=1");
         }
         var flyway = Flyway.configure().dataSource(url, "root", mysql.getPassword()).locations("classpath:db/migration").load();
-        assertThat(flyway.migrate().migrationsExecuted).isEqualTo(3);
+        assertThat(flyway.migrate().migrationsExecuted).isEqualTo(4);
         try (var connection = DriverManager.getConnection(url, "root", mysql.getPassword()); var sql = connection.createStatement()) {
             sql.executeUpdate("INSERT INTO work_schedules(user_id,store_id,work_date,start_at,status,created_by,updated_by,created_at,updated_at) VALUES (1,1,'2026-11-15','2026-11-15 01:00:00','SCHEDULED',1,1,UTC_TIMESTAMP(6),UTC_TIMESTAMP(6))");
             assertThat(flyway.migrate().migrationsExecuted).isZero();

@@ -273,3 +273,16 @@ V6가 work_schedules와 체크인 가드용 attendances 기반을 생성한다. 
 V8는 종료 시각/출처와 상태 제약을 추가한다. V1~V7 및 기존 원본/승인/멱등 응답은 유지한다. 다음 서버 기동 시 V8가 적용된다. 퇴근 안내·알림·지원 이동 검증·원본 정정은 아직 없다.
 
 검증: `./gradlew test --offline` 전체 **377건 통과**(신규 이력·승인41건, 실패/오류/스킵0). MySQL 통합 테스트는 기존 Compose DB와 분리된 컨테이너에서 실행했다.
+
+
+## 퇴근 안내 (2026-11-19)
+
+- POST /api/v1/checkout-notices: ACTIVE 일정 매장 부매니저, JSON {workScheduleIds:[701,702],plannedCheckOutAt:"2026-11-19T18:30:00+09:00"}. 대상은 당일 체크인·미종료, ID1~100개·중복 금지, 같은 서울 근무일·현재보다 늦은30분 단위다. 전원 검증 후 원자적으로 생성한다.
+- GET /api/v1/checkout-notices/me: 본인 수신 이력. GET /api/v1/checkout-notices?storeId=...: MANAGER/담당 부매니저의 매장 발송·확인 이력.
+- 목록은 fromDate/toDate 서울 발송일 양 끝 포함, page0/size20(최대100), sentAt/id 내림차순이다.
+- POST /api/v1/checkout-notices/{id}/acknowledge: 본문 없이 본인만 확인하며 반복/동시 요청에도 최초 acknowledgedAt을 유지한다.
+- 재공지는 새 행으로 남고 각각 확인한다. 일정·실제 출퇴근·운영 승인/종료는 변경하지 않는다. 지원 이동/푸시/SSE/프론트는 아직 없다.
+
+V9가 checkout_notices와 제약/인덱스를 추가한다. 다음 서버 기동 시 적용되며 기존 V1~V8과 출퇴근·승인·키 응답은 유지한다. 생성 재시도는 새 안내로 저장되므로 자동 재시도에 주의하며 생성 멱등 정책은 후속이다.
+
+검증: `./gradlew clean test --offline` 전체 **416건 통과**(신규 안내39건, 실패/오류/스킵0). 초기 빌드 클래스 읽기 I/O 오류는 생성 산출물 정리 후 해소했다. MySQL 테스트는 기존 Compose DB와 분리된 컨테이너에서 수행했다.

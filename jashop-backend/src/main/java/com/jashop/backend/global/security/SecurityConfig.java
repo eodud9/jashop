@@ -79,7 +79,8 @@ public class SecurityConfig {
                 .csrf(csrf -> csrf.ignoringRequestMatchers("/api/v1/stores", "/api/v1/stores/**",
                         "/api/v1/admin/users", "/api/v1/admin/users/**", "/api/v1/users/me",
                         "/api/v1/work-schedules", "/api/v1/work-schedules/**",
-                        "/api/v1/attendances", "/api/v1/attendances/**"))
+                        "/api/v1/attendances", "/api/v1/attendances/**",
+                        "/api/v1/checkout-notices", "/api/v1/checkout-notices/**"))
                 .oauth2ResourceServer(resource -> resource
                         .jwt(jwt -> jwt.decoder(decoder).jwtAuthenticationConverter(token -> {
                             Long userId = Long.valueOf(token.getSubject());

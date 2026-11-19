@@ -384,7 +384,7 @@ class AttendanceManagementApiTests extends JwtTestSupport {
             sql.executeUpdate("INSERT INTO attendance_checkout_requests(user_id,request_key,attendance_id,response_json,created_at) VALUES (1,'preserved',1,'{\"id\":1}',UTC_TIMESTAMP(6))");
         }
         var flyway = Flyway.configure().dataSource(url, "root", mysql.getPassword()).locations("classpath:db/migration").load();
-        assertThat(flyway.migrate().migrationsExecuted).isEqualTo(1);
+        assertThat(flyway.migrate().migrationsExecuted).isEqualTo(2);
         assertThat(flyway.migrate().migrationsExecuted).isZero();
         flyway.validate();
         try (var c = DriverManager.getConnection(url, "root", mysql.getPassword()); var sql = c.createStatement();
