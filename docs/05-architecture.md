@@ -437,3 +437,8 @@ workforce.api/DTO → WorkScheduleService → WorkSchedule/Repository로 구성�
 ## workforce 출퇴근 구현 (2026-11-14)
 
 AttendanceController/DTO → AttendanceService → Attendance/Repository 및 CheckoutRequestRepository로 연결한다. 체크인 실제/인정 시각 계산과 상태 변경은 도메인, 인증/소유권/잠금/트랜잭션은 서비스가 담당한다. 체크아웃 키 저장은 JdbcTemplate으로 같은 JPA 트랜잭션에 참여한다. 사용자 잠금 이후 키를 FOR UPDATE로 조회하여 REPEATABLE READ의 오래된 스냅샷 재사용을 피한다. 성공 응답은 JSON 스냅샷이며 승인 필드가 나중에 바뀌어도 동일 키에 최초 결과를 반환한다. 지원 기능은 아직 없어 지원 이동 차단까지 구현됐다고 주장하지 않는다.
+
+
+## 출퇴근 이력 및 운영 종료 (2026-11-18)
+
+AttendanceManagementController → AttendanceManagementService → Attendance.approve로 조회/인가와 승인 상태 전이를 분리한다. 승인자/대상 User를 ID ASC로 잠근 후 WorkSchedule → Attendance 순서로 진행한다. 두 User가 같으면 한 번만 잠근다. 직원 체크아웃은 기존 대상 User 잠금에 참여한다. 근무 종료는 closedAt으로 판단해 직원 입력 없는 운영 승인 종료도 current/중복 출근/체크아웃 재시도에서 일관되게 처리한다. 이력은 Attendance 페이지와 관련 일정의 일괄 조회로 구성해 N+1을 피하고, 기존 멱등 응답 스냅샷은 변경하지 않는다.

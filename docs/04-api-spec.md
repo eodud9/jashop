@@ -272,7 +272,7 @@ Refresh Token은 HttpOnly/Secure 쿠키에만 제공한다. 2026-11-11 사용자
 }
 ```
 
-검증 순서: ① AM(원래 **WorkSchedule.storeId**) 매장 범위 확인 ② 체크아웃 완료 확인 ③ PENDING 확인 ④ 서울 시간 기준 00/30분·초 0 확인 ⑤ 원본 `checkOutAt` 보존 ⑥ 기록 시각/승인자/승인 시각 기록. 이미 승인되었으면 임의 재기록 거절(409). 실제·운영 시각의 차이 사유 기록은 [미결].
+2026-11-18 확정: 원래 WorkSchedule.storeId의 ACTIVE AM만 승인하며 본인 승인도 허용한다. PENDING/30분 단위/허용 시각 범위를 검증한다. 직원 체크아웃은 필수가 아니며 누락 시 원본 checkOutAt=NULL을 보존하고 운영 승인으로 종료한다. 차이 사유는 요구하지 않는다. 상세는 아래 Phase 5-2 계약을 따른다.
 
 ### 3.5 퇴근 안내 — POST `/checkout-notices`
 
@@ -925,3 +925,26 @@ Idempotency-Key: 8e477ae5-080f-409a-b50c-906f46d545ef
 
 출근 없음은 current204, 잘못된 대상은404 ATTENDANCE_NOT_FOUND, 타인 대상은403 ACCESS_DENIED, 당일 외 체크인은409 ATTENDANCE_CHECK_IN_DATE, 중복 체크인은409 ALREADY_CHECKED_IN, 다중 활성/서버시각 역전은409 ATTENDANCE_INVALID_STATE다. 체크아웃 기록과 키 응답 저장 실패는 함께 롤백된다.
 지원 이동·배정 검증, 이력 목록, 운영 승인·공지와 서명 증표는 후속이다. 활성 매장만 체크인하지만 출근 이후 매장이 비활성화돼도 본인 체크아웃은 가능하다.
+
+
+## 이력·운영 퇴근 승인 구현 계약 (2026-11-18, Phase 5-2)
+
+| Method | /api/v1 하위 경로 | 권한 / 응답 |
+|---|---|---|
+| GET | /attendances/me | ACTIVE 본인 / 페이지200 |
+| GET | /attendances | ACTIVE MANAGER 또는 담당 매장 AM / 페이지200 |
+| POST | /attendances/{id}/approve | ACTIVE 일정 매장 AM(본인 포함) / 200 |
+
+목록: fromDate/toDate 필수, 서울 workDate 기준 양 끝 포함, page=0/size=20(1~100), checkInAt ASC/id ASC 고정. 매장 목록 storeId 필수. approvalStatus=PENDING 또는 APPROVED 선택이며 생략 시 전체다. 본인 목록은 요청 userId를 사용하지 않는다. 늦게 다음 날 체크아웃했어도 원래 근무일로 조회한다. 비활성 매장 이력도 조회한다. 잘못된 필터/날짜/페이지400, 권한 밖403, 매장 미존재404. no-store.
+페이지는 {content,page,size,totalElements,totalPages}이며 content는 {id,workScheduleId,userId,storeId,workDate,checkInAt,recordedCheckInAt,checkOutAt,recordedCheckOutAt,approvalStatus,approvedBy,approvedAt,closedAt,closureType,selfApproved}다. 일정은 한 페이지씩 일괄 조회한다. selfApproved는 승인자ID=직원ID인 경우 true다.
+
+승인 본문은 {recordedCheckOutAt:"2026-11-18T18:00:00+09:00"}이다. 오프셋은 필수이고 서울00/30분·초/소수초0, 인정 출근 이상, 동일 근무일, 승인 서버 시각 이하를 검증한다. 차이 사유는 필수가 아니며 이번 본문에 사유 필드는 없다. 미허용 승인자/상태/시각 필드는400이다. MANAGER의 승인 우회는 없다. 기록 대상 직원 소속 대신 일정 매장을 검증한다.
+
+| 직원 체크아웃 상태 | 승인 처리 |
+|---|---|
+| 이미 입력 | 원본 checkOutAt 및 EMPLOYEE_CHECKOUT 종료 시각 유지, 운영 퇴근·승인 정보만 기록 |
+| 누락 | checkOutAt=NULL 유지, closedAt=승인 서버 시각, closureType=ASSISTANT_APPROVAL, 운영 퇴근·승인 정보 기록 |
+
+종료 여부는 closedAt으로 판단한다. 누락 승인 후 current204, 다음 근무 체크인 가능, 늦은 직원 체크아웃은 승인 결과를200으로 반환하고 checkOutAt을 채우지 않는다. approvedAt/closedAt은 처리 시각, recordedCheckOutAt은 현장 운영 인정 시각이므로 서로 다를 수 있다.
+시각 단위 오류400 INVALID_CHECKOUT_TIME_UNIT, 범위 오류400 VALIDATION_FAILED, 반복승인409 ATTENDANCE_ALREADY_APPROVED, 미존재404 ATTENDANCE_NOT_FOUND다. 승인자/대상 User ID ASC → 일정 → 출퇴근 잠금으로 동시 승인·체크아웃을 제어하며 승인 실패 시 종료도 롤백한다.
+기존 체크아웃 키는 최초 응답을 재생하고 최신 승인 결과로 덮어쓰지 않는다. 최신 상태는 이력으로 확인한다. 실제 출근/퇴근 원본을 정정하거나 승인 후 재승인하는 API는 추가하지 않는다. 퇴근 안내·지원 이동 검증은 후속이다.

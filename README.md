@@ -259,3 +259,17 @@ V6가 work_schedules와 체크인 가드용 attendances 기반을 생성한다. 
 운영 퇴근 승인·출퇴근 이력 목록·퇴근 안내·프론트와 지원 이동 검증은 후속 단계다. 체크아웃 시각과 성공 응답 저장은 한 트랜잭션이며 실패하면 함께 롤백된다. 상세 계약은 docs/04-api-spec.md의 Phase 5-1을 따른다.
 
 검증: `./gradlew test --offline` 전체 **336건 통과**(신규 출퇴근37건, 실패/오류/스킵0). 실제 MySQL 테스트는 기존 Compose DB와 분리된 컨테이너에서 수행했다.
+
+
+## 출퇴근 이력·운영 퇴근 승인 (2026-11-18)
+
+- GET /api/v1/attendances/me: 본인 이력. fromDate/toDate 필수, page0/size20(최대100), 선택 approvalStatus=PENDING/APPROVED.
+- GET /api/v1/attendances: storeId 추가 필수, MANAGER 또는 담당 매장 부매니저. 서울 workDate 양 끝 포함, checkInAt/id ASC 고정.
+- POST /api/v1/attendances/{id}/approve: 담당 일정 매장 부매니저(본인 포함), JSON {recordedCheckOutAt:"2026-11-18T18:00:00+09:00"}. 차이 사유는 요구하지 않는다. MANAGER 승인 우회는 없다.
+- 운영 시각은 서울00/30분·초/소수초0, 인정 출근 이상·같은 근무일·승인 서버 시각 이하. 최초 승인 후 변경/반복승인은409다.
+- 직원 입력 완료: 실제 checkOutAt과 종료 출처 유지. 누락: checkOutAt=NULL 유지, closedAt=승인 처리 시각, closureType=ASSISTANT_APPROVAL로 종료한다. 정상 직원 종료 출처는 EMPLOYEE_CHECKOUT이다.
+- 활성 여부는 closedAt=NULL이다. 운영 종료 후 다음 날 체크인 가능, 늦은 직원 체크아웃도 실제 입력 시각을 새로 만들지 않는다. 기존 키는 최초 응답을 유지하고 최신 상태는 이력 조회로 확인한다.
+
+V8는 종료 시각/출처와 상태 제약을 추가한다. V1~V7 및 기존 원본/승인/멱등 응답은 유지한다. 다음 서버 기동 시 V8가 적용된다. 퇴근 안내·알림·지원 이동 검증·원본 정정은 아직 없다.
+
+검증: `./gradlew test --offline` 전체 **377건 통과**(신규 이력·승인41건, 실패/오류/스킵0). MySQL 통합 테스트는 기존 Compose DB와 분리된 컨테이너에서 실행했다.

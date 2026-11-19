@@ -325,7 +325,9 @@ V5로 구현했다. 계열에서 가장 작은 ID가 불변 루트이며 계열 
 | `work_schedule_id` | `BIGINT` | NOT NULL UNIQUE FK→work_schedules.id | 일정당 하나 |
 | `check_in_at` | `DATETIME(6)` | NOT NULL | 실제 체크인 서버 시각 UTC |
 | `recorded_check_in_at` | `DATETIME(6)` | NOT NULL | 인정 출근: 실제/예정 중 늦은 시각 |
-| `check_out_at` | `DATETIME(6)` | NULL | 실제 체크아웃 서버 시각 UTC |
+| `check_out_at` | `DATETIME(6)` | NULL | 직원 체크아웃 입력 서버 시각 UTC, 누락 승인에서는 NULL 유지 |
+| `closed_at` | `DATETIME(6)` | NULL | 시스템상 근무 종료 처리 시각 UTC, 활성 판단 기준 |
+| `closure_type` | `VARCHAR(32)` | NULL | EMPLOYEE_CHECKOUT / ASSISTANT_APPROVAL |
 | `recorded_check_out_at` | `DATETIME(6)` | NULL | 부매니저가 직접 지정한 30분 단위 운영 시각 |
 | `approval_status` | `VARCHAR(24)` | NOT NULL | PENDING / APPROVED |
 | `approved_by` | `BIGINT` | NULL FK→users.id | 기본 일정 매장 부매니저 |
@@ -627,3 +629,8 @@ V6는 work_schedules와 체크인 변경 가드용 attendances를 생성한다. 
 
 V7는 attendances.recorded_check_in_at을 추가하고 기존 데이터를 GREATEST(check_in_at, 일정 start_at)으로 보충한 뒤 NOT NULL 및 실제 시각 이상 CHECK를 적용한다. 실제/운영 퇴근 및 승인 원본은 변경하지 않는다. Attendance 엔티티와 체크인/아웃/현재 조회를 구현했다.
 새 attendance_checkout_requests는 id BIGINT PK, user_id FK, request_key ASCII VARCHAR(128) ascii_bin, attendance_id FK, response_json LONGTEXT(JSON_VALID CHECK), created_at UTC DATETIME(6)이다. UNIQUE(user_id,request_key)로 사용자별 키 중복을 막고 최초 성공 응답을 저장한다. 자동 삭제/만료는 없다. User 행 잠금으로 동일 사용자 체크아웃을 직렬화하며 원본 체크아웃과 키 저장은 함께 커밋한다. 서명된 요청 증표는 도입하지 않았다.
+
+
+### Phase 5-2 구현 메모 (2026-11-18)
+
+V8는 closed_at/closure_type을 추가하고 기존 check_out_at이 있는 행을 EMPLOYEE_CHECKOUT으로 보충한다. 실제 원본/운영 승인/키 응답은 보존한다. PENDING은 승인 메타데이터/운영 퇴근 없음, APPROVED는 운영 퇴근/승인자/승인시각/종료시각 필수다. 열린 행은 closed_at/closure_type/check_out_at이 모두 NULL인 PENDING이다. 직원 종료는 closed_at=check_out_at, 운영 종료는 check_out_at=NULL 및 closed_at=approved_at인 APPROVED다. DB CHECK로 종료 출처 누락·모순을 차단한다. 운영 시각의30분/근무일/인정 출근 이상/미래 아님 규칙은 도메인에서 검증하며 기존 승인 값은 마이그레이션으로 재해석하지 않는다.

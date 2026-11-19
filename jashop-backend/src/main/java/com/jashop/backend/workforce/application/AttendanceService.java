@@ -75,7 +75,7 @@ public class AttendanceService {
         requireOwner(actor, schedule.getUserId());
         var attendance = attendances.findByIdForUpdate(attendanceId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.ATTENDANCE_NOT_FOUND));
-        if (attendance.getCheckOutAt() == null) {
+        if (!attendance.isClosed()) {
             var active = attendances.findActiveForUpdate(actor);
             if (active.size() != 1 || !active.getFirst().getId().equals(attendanceId)) {
                 throw new BusinessException(ErrorCode.ATTENDANCE_INVALID_STATE);

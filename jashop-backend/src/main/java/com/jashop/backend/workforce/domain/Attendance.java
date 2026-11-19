@@ -30,6 +30,10 @@ public class Attendance {
     private Instant approvedAt;
     @JdbcTypeCode(SqlTypes.TIMESTAMP) @Column(name = "created_at", nullable = false, updatable = false, columnDefinition = "datetime(6)")
     private Instant createdAt;
+    @JdbcTypeCode(SqlTypes.TIMESTAMP) @Column(name = "closed_at", columnDefinition = "datetime(6)")
+    private Instant closedAt;
+    @Enumerated(EnumType.STRING) @JdbcTypeCode(SqlTypes.VARCHAR) @Column(name = "closure_type", length = 32)
+    private AttendanceClosureType closureType;
 
     protected Attendance() {}
 
@@ -51,11 +55,39 @@ public class Attendance {
     }
 
     public void checkOut(Instant now) {
-        if (checkOutAt != null) throw new BusinessException(ErrorCode.ALREADY_CHECKED_OUT);
+        if (isClosed()) throw new BusinessException(ErrorCode.ALREADY_CHECKED_OUT);
         Instant actual = now.truncatedTo(ChronoUnit.MICROS);
         if (actual.isBefore(checkInAt)) throw new BusinessException(ErrorCode.ATTENDANCE_INVALID_STATE);
         checkOutAt = actual;
+        closedAt = actual;
+        closureType = AttendanceClosureType.EMPLOYEE_CHECKOUT;
     }
+
+    public void approve(Instant recorded, Long actor, Instant now, java.time.LocalDate workDate) {
+        if (approvalStatus != AttendanceApprovalStatus.PENDING) {
+            throw new BusinessException(ErrorCode.ATTENDANCE_ALREADY_APPROVED);
+        }
+        if (recorded == null || actor == null || actor <= 0) throw new BusinessException(ErrorCode.VALIDATION_FAILED);
+        var local = recorded.atZone(WorkSchedule.SEOUL);
+        if (local.getMinute() % 30 != 0 || local.getSecond() != 0 || local.getNano() != 0) {
+            throw new BusinessException(ErrorCode.INVALID_CHECKOUT_TIME_UNIT);
+        }
+        Instant approved = now.truncatedTo(ChronoUnit.MICROS);
+        if (!local.toLocalDate().equals(workDate) || recorded.isBefore(recordedCheckInAt)
+                || recorded.isAfter(approved) || approved.isBefore(checkInAt)) {
+            throw new BusinessException(ErrorCode.VALIDATION_FAILED);
+        }
+        recordedCheckOutAt = recorded;
+        approvedBy = actor;
+        approvedAt = approved;
+        approvalStatus = AttendanceApprovalStatus.APPROVED;
+        if (!isClosed()) {
+            closedAt = approved;
+            closureType = AttendanceClosureType.ASSISTANT_APPROVAL;
+        }
+    }
+
+    public boolean isClosed() { return closedAt != null; }
 
     public Long getId() { return id; }
     public Long getWorkScheduleId() { return workScheduleId; }
@@ -67,4 +99,6 @@ public class Attendance {
     public Long getApprovedBy() { return approvedBy; }
     public Instant getApprovedAt() { return approvedAt; }
     public Instant getCreatedAt() { return createdAt; }
+    public Instant getClosedAt() { return closedAt; }
+    public AttendanceClosureType getClosureType() { return closureType; }
 }
