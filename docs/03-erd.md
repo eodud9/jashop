@@ -4,10 +4,12 @@
 - **17개 테이블은 확정된 도메인 구성**이며, 이 문서의 상세 SQL 타입·추가 컬럼·인덱스는 구현 기준안이다.
 - 실제 구현 전 Flyway DDL을 작성하고 MySQL Testcontainers로 검증한다. **이 문서 자체가 이미 실행된 마이그레이션은 아니다.**
 
-**구현 상태(2026-11-11):** V1 stores, V2 users, V5 auth_sessions를 구현했다. 나머지 14개 업무 테이블은 미구현이다. V2는 별도 Testcontainers MySQL에서 검증하며 기존 로컬 DB에 자동 적용하지 않는다.
+**초기 구현 기록(2026-11-11):** V1 stores, V2 users, V5 auth_sessions를 구현했다. 나머지 14개 업무 테이블은 미구현이다. V2는 별도 Testcontainers MySQL에서 검증하며 기존 로컬 DB에 자동 적용하지 않는다.
 V4는 users의 선택적 거절 사유 컬럼(rejection_reason)을 추가한다. 기존 사용자 행은 유지한다.
 V3 `manager_bootstrap` 운영 테이블을 추가했다(2026-11-10). `id TINYINT PK CHECK(id=1)`, `user_id BIGINT NULL FK users(id)`, `completed_at DATETIME(6) NULL`이며 사용자/완료 시각은 둘 다 NULL 또는 둘 다 NOT NULL이다. 초기 id=1 행을 생성하고 FOR UPDATE로 잠근 뒤 사용자 생성과 완료 기록을 한 트랜잭션으로 커밋한다. 완료 기록은 관리자 비활성화 후에도 보존한다.
 목표 테이블은 업무 17개 + 운영 1개다. Flyway 이력 테이블은 이와 별개의 도구 관리 테이블이다.
+
+현재 구현 범위는 [진행 상태](progress.md)를 따른다. V10은 products와 product_variants를 추가하며 기존 V1~V9와 데이터를 변경하지 않는다.
 
 ## 1. 공통 규칙
 
@@ -404,6 +406,10 @@ V5로 구현했다. 계열에서 가장 작은 ID가 불변 루트이며 계열 
 | `color` | `VARCHAR(80)` | NULL | 색상 |
 | `active` | `BOOLEAN` | NOT NULL DEFAULT TRUE | 활성 여부 |
 | `created_at` | `DATETIME(6)` | NOT NULL | 등록 시각 |
+| `updated_at` | `DATETIME(6)` | NOT NULL | 변경 시각 |
+
+V10 구현: SKU는 `utf8mb4_0900_bin` 비교로 정규화한 실제 문자열을 고유하게 관리한다. 애플리케이션이 strip/대문자 변환하며 비활성 SKU도 UNIQUE 범위에 포함한다. 색상·사이즈 모두 NULL 가능하다. products(active,id), product_variants(product_id,active,id) 인덱스로 목록/옵션 페이지를 지원한다. 두 테이블 모두 이름/SKU 비어 있음 방지 CHECK와 기본 활성값을 적용한다. SKU·부모 ID는 수정 API와 JPA에서 변경하지 않는다.
+
 
 ### 11. `storage_locations` — 내부/공용 창고 및 세부 위치
 

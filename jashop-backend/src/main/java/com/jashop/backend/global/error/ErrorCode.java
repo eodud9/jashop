@@ -47,6 +47,8 @@ public enum ErrorCode {
     CHECKOUT_NOTICE_TARGET_INVALID(HttpStatus.CONFLICT, "당일 체크인한 미종료 근무에만 퇴근 안내를 생성할 수 있습니다."),
     INVALID_NOTICE_TIME_UNIT(HttpStatus.BAD_REQUEST, "퇴근 안내 시각은 30분 단위여야 합니다."),
     PRODUCT_NOT_FOUND(HttpStatus.NOT_FOUND, "상품을 찾을 수 없습니다."),
+    PRODUCT_INACTIVE(HttpStatus.CONFLICT, "비활성 상품에는 새 옵션을 등록할 수 없습니다."),
+    DUPLICATE_SKU(HttpStatus.CONFLICT, "이미 사용 중인 SKU입니다."),
     PRODUCT_VARIANT_NOT_FOUND(HttpStatus.NOT_FOUND, "상품 옵션을 찾을 수 없습니다."),
     STORAGE_LOCATION_NOT_FOUND(HttpStatus.NOT_FOUND, "보관 위치를 찾을 수 없습니다."),
     STOCK_REQUEST_NOT_FOUND(HttpStatus.NOT_FOUND, "재고 확인 요청을 찾을 수 없습니다."),

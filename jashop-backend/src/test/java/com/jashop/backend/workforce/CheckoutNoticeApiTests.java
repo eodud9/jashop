@@ -435,7 +435,7 @@ class CheckoutNoticeApiTests extends JwtTestSupport {
             sql.executeUpdate("INSERT INTO attendance_checkout_requests(user_id,request_key,attendance_id,response_json,created_at) VALUES (1,'preserved',1,'{\"id\":1}',UTC_TIMESTAMP(6))");
         }
         var flyway = Flyway.configure().dataSource(url, "root", mysql.getPassword()).locations("classpath:db/migration").load();
-        assertThat(flyway.migrate().migrationsExecuted).isEqualTo(1);
+        assertThat(flyway.migrate().migrationsExecuted).isEqualTo(2);
         try (var c = DriverManager.getConnection(url, "root", mysql.getPassword()); var sql = c.createStatement()) {
             sql.executeUpdate("INSERT INTO checkout_notices(work_schedule_id,planned_check_out_at,sent_by,sent_at) VALUES (1,'2026-11-19 09:00:00',1,'2026-11-19 08:40:00')");
             assertThat(flyway.migrate().migrationsExecuted).isZero();

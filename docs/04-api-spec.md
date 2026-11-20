@@ -306,41 +306,68 @@ Refresh Token은 HttpOnly/Secure 쿠키에만 제공한다. 2026-11-11 사용자
 |---|---|---|---|
 | GET | `/products?keyword=&page=0&size=20` | STAFF+ | 상품/옵션 검색 |
 | GET | `/products/{id}` | STAFF+ | 상품·옵션 목록 |
-| GET | `/product-variants/{id}` | STAFF+ | 옵션 상세, Redis 최근 조회 기록 |
+| GET | `/product-variants/{id}` | STAFF+ | 옵션 상세(Redis 최근 조회 기록은 후속) |
 | GET | `/product-variants/{id}/stock-records` | STAFF+ | 위치별 마지막 확인값 |
 | GET | `/products/recent` | 본인 | Redis 최근 조회한 옵션 10개 |
-| POST | `/products` | MANAGER | 공통 상품 등록 |
+| POST | `/products` | MANAGER | 상품·첫 옵션 동시 등록 |
 | PATCH | `/products/{id}` | MANAGER | 공통 상품 수정 |
 | POST | `/products/{id}/variants` | MANAGER | 상품 옵션 등록 |
-| PATCH | `/product-variants/{id}` | MANAGER | 옵션 수정 [권장] |
+| PATCH | `/product-variants/{id}` | MANAGER | 옵션 수정 |
 | GET | `/storage-locations` | STAFF+ | 내부/공용 위치 조회 |
 | GET | `/storage-locations/{id}` | STAFF+ | 위치 상세 [권장] |
 | POST | `/storage-locations` | MANAGER | 창고/위치 등록 |
 | PATCH | `/storage-locations/{id}` | MANAGER | 이름/활성 상태 변경 [권장] |
 | GET | `/stock-verifications` | STAFF+ 범위 검사 | 마지막 확인 이력 검색 [권장] |
 
-### 4.2 상품 검색 — GET `/products?keyword=홈유니폼&page=0&size=20`
+### 4.2 상품·옵션 구현 계약 (2026-11-20)
+
+아래 카탈로그 API는 구현됐다. 위치·재고·Redis 최근 조회 API는 후속이며, 옵션 상세 조회는 현재 Redis 기록을 생성하지 않는다. 모든 경로는 `/api/v1` 접두사를 사용하고 Access Bearer로 인증한다. 카탈로그는 전 매장 공통이므로 담당 매장 필터가 없다.
+
+| Method | Endpoint | 권한 | 응답 |
+|---|---|---|---|
+| POST | `/products` | ACTIVE MANAGER | 상품과 첫 옵션을 함께 생성, 201 |
+| PATCH | `/products/{id}` | ACTIVE MANAGER | 상품 수정, 200 |
+| GET | `/products` | ACTIVE STAFF+ | 상품 요약 페이지 |
+| GET | `/products/{id}` | ACTIVE STAFF+ | 상품 정보와 옵션 페이지 |
+| POST | `/products/{id}/variants` | ACTIVE MANAGER | 옵션 추가, 201 |
+| GET | `/products/{id}/variants` | ACTIVE STAFF+ | 옵션 페이지 |
+| GET | `/product-variants/{id}` | ACTIVE STAFF+ | 옵션 상세 |
+| PATCH | `/product-variants/{id}` | ACTIVE MANAGER | 옵션 수정, 200 |
+
+**상품과 첫 옵션 생성**
 
 ```json
 {
-  "content": [
-    {
-      "productId": 101,
-      "productName": "2026 홈 유니폼",
-      "variants": [
-        {"id": 1001, "size": "M", "color": "화이트", "sku": "HOME-2026-M"},
-        {"id": 1002, "size": "L", "color": "화이트", "sku": "HOME-2026-L"}
-      ]
-    }
-  ],
-  "page": 0,
-  "size": 20,
-  "totalElements": 1,
-  "totalPages": 1
+  "name": "부채",
+  "category": "응원용품",
+  "description": null,
+  "firstVariant": {"sku": "FAN-001", "size": null, "color": null}
 }
 ```
 
-이 JSON은 **조회 예시**다. 대규모 상품 목록에서 모든 옵션을 무제한 중첩 반환하지 않는다. 실제 검색 조건과 페이징 쿼리를 구현하면서 정한다. 공통 상품 마스터 변경은 MANAGER 권한으로 제한한다.
+- `firstVariant`와 SKU는 필수다. 상품·첫 옵션은 한 트랜잭션이며 첫 옵션 저장이 실패하면 상품도 남지 않는다.
+- 응답은 `{product:{id,name,category,description,active,createdAt,updatedAt}, firstVariant:{id,productId,productName,sku,size,color,active,effectiveActive,createdAt,updatedAt}}`다. Location은 상품 상세 경로다.
+- 색상·사이즈가 없는 상품도 SKU를 가진 옵션 1개를 생성한다. 두 속성은 독립적으로 선택이며 미지정·빈 문자열은 null로 저장한다. 임의의 `없음`, `FREE` 값을 자동 생성하지 않는다.
+- 상품명 200자 필수, 분류 100자 선택, 설명 10,000자 선택. SKU 100자 필수, 사이즈 50자·색상 80자 선택. 앞뒤 공백은 strip한다. SKU는 Locale.ROOT 대문자로 정규화한 후 길이를 검사한다.
+- SKU는 전 카탈로그에서 고유하며 비활성 SKU도 재사용할 수 없다. SKU·상위 상품은 생성 후 변경 불가다. DB UNIQUE도 동시 중복을 방지하고 중복은 `DUPLICATE_SKU` 409다. 같은 사이즈·색상의 별도 SKU 생성은 허용한다.
+
+**수정 및 활성 상태**
+
+- 상품 PATCH 본문은 `{name,category,description,active}`, 옵션 PATCH는 `{size,color,active}`다. 수정 가능한 필드 묶음을 교체한다. name/active 필수이며 생략한 선택 문자열은 null로 초기화한다. 허용하지 않은 필드는 400이다.
+- 새 상품·옵션은 활성으로 생성한다. 상품 비활성화 시 자식 옵션의 active 값을 덮어쓰지 않는다. `effectiveActive = product.active && variant.active`로 사용 가능 여부를 응답한다. 재활성화하면 자식의 기존 설정이 복원된다.
+- 비활성 상품에 옵션 추가는 `PRODUCT_INACTIVE` 409다. 기존 옵션의 속성·active 수정은 가능하다. 삭제 API는 제공하지 않는다.
+- 변경은 상품 행을 `PESSIMISTIC_WRITE`로 잠근다. 옵션 수정은 불변 부모 ID만 먼저 읽고 **Product → ProductVariant** 순서로 잠근다. 상품 비활성화와 옵션 추가가 동시에 진행될 때 같은 부모 행에서 직렬화한다.
+
+**조회·검색·페이지**
+
+- 일반 조회는 활성 상품·옵션만 노출한다. 비활성 상세는 404다. `includeInactive=true`는 ACTIVE MANAGER만 사용하며 자식 비활성 설정도 반환한다. MANAGER도 기본값은 false다.
+- 상품 목록: `keyword` 선택(최대200자), `page=0`, `size=20`(1~100), id ASC 고정. 상품명 또는 옵션의 SKU·사이즈·색상 부분 일치로 상품을 검색한다. 이름·속성은 대소문자를 구분하지 않고 SKU는 대문자 정규화한다. `%`, `_`, `!`는 검색 와일드카드가 아닌 문자로 처리한다. 카테고리·설명은 검색 대상이 아니다.
+- 기본 검색의 옵션 조건은 활성 옵션만 검사한다. 상품명 자체가 일치하면 활성 옵션 수가 0개여도 활성 상품은 조회된다. 동일 상품에 여러 옵션이 일치해도 상품은 한 번만 나온다.
+- 목록 응답: `{content:[{id,name,category,active}],page,size,totalElements,totalPages}`. 설명과 전체 옵션은 중첩하지 않는다.
+- 상품 상세 응답: `{product:{...}, variants:{content:[옵션상세],page,size,totalElements,totalPages}}`. `variantPage=0`, `variantSize=20`(최대100)이며 옵션 id ASC다.
+- 별도 옵션 목록은 `page=0`, `size=20`(최대100), id ASC다. 옵션 상세에는 옵션 자체 active와 부모까지 반영한 effectiveActive를 모두 포함한다.
+- 시각은 UTC ISO 8601이며 DB는 UTC DATETIME(6)이다. 페이지 번호 음수·크기 범위 초과·offset 정수 범위 초과는 400이다.
+- 부분 일치 검색은 일반 MySQL 쿼리로 처리한다. 대규모 검색을 위한 전문 검색과 Redis 기록은 후속 범위다.
 
 ### 4.3 위치별 마지막 수동 확인값 — GET `/product-variants/{id}/stock-records`
 

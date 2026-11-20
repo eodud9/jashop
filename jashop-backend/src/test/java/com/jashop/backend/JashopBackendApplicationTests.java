@@ -34,6 +34,12 @@ class JashopBackendApplicationTests extends com.jashop.backend.support.JwtTestSu
 	@MockitoBean
 	com.jashop.backend.workforce.infrastructure.CheckoutNoticeRepository notices;
 
+	@MockitoBean
+	com.jashop.backend.catalog.infrastructure.ProductRepository products;
+
+	@MockitoBean
+	com.jashop.backend.catalog.infrastructure.ProductVariantRepository variants;
+
 	@Test
 	void contextLoads() {
 	}

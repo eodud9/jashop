@@ -177,7 +177,11 @@ public record CurrentWorkStatus(
 - Product는 매장과 무관한 공통 상품 마스터. 이름·분류·활성 여부 등을 관리한다.
 - ProductVariant는 상품의 사이즈·색상 등 판매/확인 옵션을 나타낸다. SKU 고유 제약.
 - 동일 상품 옵션은 여러 위치에 저장될 수 있고, 동일 위치에도 여러 옵션이 존재한다.
-- [권장] 공통 마스터 변경은 총괄 MANAGER로 제한. 운영 직원은 조회·확인 업무만 수행.
+- 공통 마스터 변경은 ACTIVE MANAGER 전용이며, ACTIVE 직원은 전 매장 공통 카탈로그를 조회한다.
+- 상품 생성 시 첫 옵션을 반드시 함께 생성한다. 부채처럼 색상·사이즈가 없는 상품은 두 속성이 null인 SKU 옵션으로 표현한다. 한 속성만 있는 옵션도 허용한다.
+- SKU는 strip + Locale.ROOT 대문자로 정규화하며 생성 이후 변경·비활성 SKU 재사용을 금지한다. 사이즈·색상 조합 자체의 유일성은 강제하지 않는다.
+- 부모 비활성화는 자식 active를 보존한다. 사용 가능 여부는 product.active && variant.active이며 기본 조회는 활성만 반환한다. 비활성 포함 조회는 MANAGER만 가능하다.
+- 상품·첫 옵션은 원자적으로 저장한다. 변경 시 Product → ProductVariant 잠금 순서를 지키며 비활성 부모에 옵션 추가는 금지한다.
 
 ### StorageLocation
 
